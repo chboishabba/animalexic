@@ -1,0 +1,229 @@
+#version 450
+
+// Deterministic ROI-constrained stereo (Census + WTA).
+// Produces candidate disparity, cost, confidence gap, validity, severity.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Inputs
+layout(set = 0, binding = 0, r8ui) uniform readonly uimage2D left_r8;
+layout(set = 0, binding = 1, r8ui) uniform readonly uimage2D right_r8;
+layout(set = 0, binding = 2, std430) buffer ROITiles {
+    uint data[];
+} roi_tiles; // packed ROITile array
+layout(set = 0, binding = 3, r8ui) uniform readonly uimage2D roi_mask_opt; // optional, may be zero-bound
+
+// Params
+layout(std140, set = 0, binding = 4) uniform FrameMeta {
+    uint width;
+    uint height;
+    uint left_stride_px;
+    uint right_stride_px;
+    uint tile_w;
+    uint tile_h;
+    uint num_roi_tiles;
+    uint reserved0;
+} F;
+
+layout(std140, set = 0, binding = 5) uniform StereoROIParams {
+    uint d_min;
+    uint d_max;
+    uint census_radius;
+    uint support_radius;
+
+    uint min_texture;
+    uint max_cost;
+    uint min_conf_gap;
+    uint left_border_guard;
+
+    uint right_border_guard;
+    uint enable_dense_roi_mask;
+    uint enable_support_agg;
+    uint enable_prov_rows;
+
+    uint severity_invalid_roi;
+    uint severity_low_texture;
+    uint severity_out_of_range;
+    uint severity_ambiguous;
+} P;
+
+// Outputs
+layout(set = 0, binding = 6, r16ui) uniform writeonly uimage2D disparity_q8;
+layout(set = 0, binding = 7, r16ui) uniform writeonly uimage2D cost_min;
+layout(set = 0, binding = 8, r16ui) uniform writeonly uimage2D conf_gap;
+layout(set = 0, binding = 9, r8ui)  uniform writeonly uimage2D valid_mask;
+layout(set = 0, binding = 10, r8ui) uniform writeonly uimage2D severity_map;
+
+// Optional provenance buffer (one entry per pixel when enabled)
+layout(set = 0, binding = 11, std430) buffer ProvBuf {
+    uint prov_data[];
+} prov_buf;
+
+// --- Helpers ---------------------------------------------------------------
+
+struct ROITile {
+    uint x0;
+    uint y0;
+    uint w;
+    uint h;
+};
+
+ROITile load_tile(uint idx) {
+    uint base = idx * 4u;
+    ROITile t;
+    t.x0 = roi_tiles.data[base + 0u];
+    t.y0 = roi_tiles.data[base + 1u];
+    t.w  = roi_tiles.data[base + 2u];
+    t.h  = roi_tiles.data[base + 3u];
+    return t;
+}
+
+bool in_bounds(int x, int y, int w, int h) {
+    return (x >= 0 && y >= 0 && x < w && y < h);
+}
+
+// --- Main ------------------------------------------------------------------
+
+void main() {
+    uint tile_idx = gl_WorkGroupID.x;
+    if (tile_idx >= F.num_roi_tiles) {
+        return;
+    }
+
+    ROITile tile = load_tile(tile_idx);
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    ivec2 px = ivec2(int(tile.x0) + local.x, int(tile.y0) + local.y);
+
+    if (px.x >= int(tile.x0 + tile.w) || px.y >= int(tile.y0 + tile.h)) {
+        return; // outside partial tile
+    }
+    if (!in_bounds(px.x, px.y, int(F.width), int(F.height))) {
+        return;
+    }
+
+    // ROI dense mask check if enabled
+    if (P.enable_dense_roi_mask != 0u) {
+        if (imageLoad(roi_mask_opt, px).r == 0u) {
+            imageStore(valid_mask, px, uvec4(0u, 0u, 0u, 0u));
+            imageStore(severity_map, px, uvec4(P.severity_invalid_roi, 0u, 0u, 0u));
+            return;
+        }
+    }
+
+    // Border guards
+    if (px.x < int(P.left_border_guard) || px.x >= int(F.width) - int(P.right_border_guard)) {
+        imageStore(valid_mask, px, uvec4(0u, 0u, 0u, 0u));
+        imageStore(severity_map, px, uvec4(P.severity_out_of_range, 0u, 0u, 0u));
+        return;
+    }
+
+    // Census descriptor for left
+    uint centerL = imageLoad(left_r8, px).r;
+    uint censusL = 0u;
+    {
+        uint bit = 0u;
+        for (int dy = -2; dy <= 2; ++dy) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                if (dx == 0 && dy == 0) { continue; }
+                uint v = imageLoad(left_r8, px + ivec2(dx, dy)).r;
+                if (v < centerL) {
+                    censusL |= (1u << bit);
+                }
+                bit++;
+            }
+        }
+    }
+
+    // Texture check: quick range measure inside 5x5 (reuse census loop)
+    uint minv = 255u;
+    uint maxv = 0u;
+    for (int dy = -2; dy <= 2; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+            uint v = imageLoad(left_r8, px + ivec2(dx, dy)).r;
+            minv = min(minv, v);
+            maxv = max(maxv, v);
+        }
+    }
+    uint texture = maxv - minv;
+    if (texture < P.min_texture) {
+        imageStore(valid_mask, px, uvec4(0u, 0u, 0u, 0u));
+        imageStore(severity_map, px, uvec4(P.severity_low_texture, 0u, 0u, 0u));
+        return;
+    }
+
+    uint best_cost = 0xffffffffu;
+    uint second_cost = 0xffffffffu;
+    uint best_d = 0u;
+
+    // Disparity search
+    for (uint d = P.d_min; d <= P.d_max; ++d) {
+        int xr = px.x - int(d);
+        if (xr < 0) { continue; }
+        if (xr < int(P.left_border_guard)) { continue; }
+
+        ivec2 pr = ivec2(xr, px.y);
+        // Census for right
+        uint centerR = imageLoad(right_r8, pr).r;
+        uint censusR = 0u;
+        {
+            uint bit = 0u;
+            for (int dy = -2; dy <= 2; ++dy) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    if (dx == 0 && dy == 0) { continue; }
+                    uint v = imageLoad(right_r8, pr + ivec2(dx, dy)).r;
+                    if (v < centerR) {
+                        censusR |= (1u << bit);
+                    }
+                    bit++;
+                }
+            }
+        }
+        uint c = uint(bitCount(censusL ^ censusR));
+
+        if (c < best_cost) {
+            second_cost = best_cost;
+            best_cost = c;
+            best_d = d;
+        } else if (c < second_cost) {
+            second_cost = c;
+        }
+    }
+
+    if (best_cost == 0xffffffffu) {
+        imageStore(valid_mask, px, uvec4(0u, 0u, 0u, 0u));
+        imageStore(severity_map, px, uvec4(P.severity_out_of_range, 0u, 0u, 0u));
+        return;
+    }
+
+    uint conf = (second_cost == 0xffffffffu) ? 0u : (second_cost - best_cost);
+
+    // Hard validity checks
+    uint valid = 1u;
+    uint sev = 0u;
+    if (best_cost > P.max_cost) { valid = 0u; sev = max(sev, P.severity_out_of_range); }
+    if (conf < P.min_conf_gap) { valid = 0u; sev = max(sev, P.severity_ambiguous); }
+
+    // Outputs
+    imageStore(disparity_q8, px, uvec4(best_d << 8, 0u, 0u, 0u));
+    imageStore(cost_min, px, uvec4(best_cost, 0u, 0u, 0u));
+    imageStore(conf_gap, px, uvec4(conf, 0u, 0u, 0u));
+    imageStore(valid_mask, px, uvec4(valid, 0u, 0u, 0u));
+    imageStore(severity_map, px, uvec4(sev, 0u, 0u, 0u));
+
+    // Optional provenance (pack x,y,best_d,best_cost,second_cost,flags)
+    if (P.enable_prov_rows != 0u) {
+        uint flags = 0u;
+        if (valid == 0u) {
+            if (sev == P.severity_out_of_range) flags |= 1u << 2;
+            if (sev == P.severity_ambiguous)    flags |= 1u << 4;
+            if (sev == P.severity_low_texture)  flags |= 1u << 3;
+        }
+        uint idx = (px.y * F.width + px.x) * 4u;
+        // Ensure buffer is large enough on host; here we write densely.
+        prov_buf.prov_data[idx + 0u] = (uint(px.y) << 16) | uint(px.x);
+        prov_buf.prov_data[idx + 1u] = best_d;
+        prov_buf.prov_data[idx + 2u] = best_cost;
+        prov_buf.prov_data[idx + 3u] = (second_cost == 0xffffffffu) ? 0u : second_cost;
+        // flags could be appended if buffer sized for 5th word; kept minimal here.
+    }
+}

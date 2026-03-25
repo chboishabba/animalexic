@@ -1,0 +1,3 @@
+/home/c/Documents/code/animalexic/build/CMakeFiles/shaders.dir
+/home/c/Documents/code/animalexic/build/CMakeFiles/edit_cache.dir
+/home/c/Documents/code/animalexic/build/CMakeFiles/rebuild_cache.dir

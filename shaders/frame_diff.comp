@@ -1,0 +1,67 @@
+#version 450
+
+// Local, deterministic frame differencer for motion masks.
+// Outputs residual (abs diff), motion mask, and severity witness.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Readonly current / previous grayscale frames
+layout(set = 0, binding = 0, r8ui) uniform readonly uimage2D curr_frame;
+layout(set = 0, binding = 1, r8ui) uniform readonly uimage2D prev_frame;
+
+// Optional prior valid mask (0/1); if unused, bind a zero-filled image
+layout(set = 0, binding = 2, r8ui) uniform readonly uimage2D prior_mask;
+
+// Outputs
+layout(set = 0, binding = 3, r16ui) uniform writeonly uimage2D diff_out;
+layout(set = 0, binding = 4, r8ui)  uniform writeonly uimage2D mask_out;
+layout(set = 0, binding = 5, r8ui)  uniform writeonly uimage2D severity_out;
+
+layout(std140, set = 0, binding = 6) uniform FrameDiffParams {
+    uint width;
+    uint height;
+    uint diff_threshold;
+    uint min_luma;
+    uint use_prior_mask;
+    uint severity_low_luma;
+    uint severity_motion;
+    uint severity_masked_out;
+} P;
+
+void main() {
+    ivec2 xy = ivec2(gl_GlobalInvocationID.xy);
+
+    if (xy.x < 0 || xy.y < 0 || xy.x >= int(P.width) || xy.y >= int(P.height)) {
+        return;
+    }
+
+    uint curr = imageLoad(curr_frame, xy).r;
+    uint prev = imageLoad(prev_frame, xy).r;
+
+    uint diffv = (curr > prev) ? (curr - prev) : (prev - curr);
+
+    uint prior_ok = 1u;
+    if (P.use_prior_mask != 0u) {
+        prior_ok = (imageLoad(prior_mask, xy).r != 0u) ? 1u : 0u;
+    }
+
+    uint motion = (diffv >= P.diff_threshold) ? 1u : 0u;
+    uint bright_enough = (curr >= P.min_luma || prev >= P.min_luma) ? 1u : 0u;
+
+    uint maskv = (motion != 0u && bright_enough != 0u && prior_ok != 0u) ? 1u : 0u;
+
+    uint sev = 0u;
+    if (bright_enough == 0u) {
+        sev = max(sev, P.severity_low_luma);
+    }
+    if (motion != 0u) {
+        sev = max(sev, P.severity_motion);
+    }
+    if (prior_ok == 0u) {
+        sev = max(sev, P.severity_masked_out);
+    }
+
+    imageStore(diff_out, xy, uvec4(diffv, 0, 0, 0));
+    imageStore(mask_out, xy, uvec4(maskv, 0, 0, 0));
+    imageStore(severity_out, xy, uvec4(sev, 0, 0, 0));
+}
