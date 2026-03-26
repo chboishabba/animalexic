@@ -19,6 +19,7 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 ### M1 — Baseline Regime A pipeline
 - Select stereo matcher (see M0 decision below) and run: calibration → rectification → disparity/depth → reprojection.
 - Implement delta gating (frame_t - frame_{t-1}) to reduce work; measure effect.
+- Add temporal merge + accumulation of disparity/depth into persistent canonical state with promote/abstain receipts.
 - Metrics pass: FPS and latency breakdown on a fixed test clip; identify bottlenecks.
 
 ### M2 — 4K60 optimisation
@@ -58,9 +59,12 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 - Thermal throttling: monitor clocks; keep a lower-power profile for long runs.
 
 ## Immediate actions (next 3 working sessions)
-- Stand up Retinify locally and run a 4K test clip (even synthetic) to get baseline FPS.
+- Generate a calibration artifact and validate rectified/canonical depth on a local stereo clip; self-calibration is the default end-user path, with board calibration as an optional higher-quality route.
 - Capture or download two short clips for evaluation sets (fixed rig + dual-phone).
 - Add lightweight instrumentation wrapper to log FPS/latency/pixel coverage per stage.
+- Stand up Retinify locally and run a 4K test clip (even synthetic) to get baseline FPS once calibrated/local validation is stable.
+- Runtime profiles are now explicit: `demo`, `demo_loose`, `calibrated`, `strict`; use `calibrated` for artifact-backed local validation and keep demo profiles for synthetic sanity only.
+- Calibration artifact sources now include both board-based calibration and self-calibration from matched stereo imagery.
 
 ## Vulkan assets available (from ../dashiCORE)
 - IO / convert: `spv/nv12_to_r8.spv`, `spv/nv12_to_rgba.spv`, `spv/write_image.spv` (plus preview vert/frag) — good for ingest + debug blits.

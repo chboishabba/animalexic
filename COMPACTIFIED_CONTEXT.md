@@ -21,3 +21,11 @@
 - Define evaluation clips (fixed-rig kennel/room + dual-phone opportunistic captures).
 - Decide how to persist and refresh extrinsics for Regime B (frequency, confidence, and failure handling).
 - Capture benchmarks for delta-processing savings vs full-frame stereo at 4K.
+
+## Local decisions after initial prototype
+
+- Relative 3D on a CGI SBS YouTube source is now "good enough" for sanity-checking the governed runtime: ROI tiling, promote/abstain, temporal merge, temporal accumulation, and SQLite receipts all run end-to-end.
+- The repo is moving on from demo tuning. The next execution surface is a local or real fixed-rig stereo source plus calibration artifact generation.
+- Current demo-mode limitation is accepted: uncalibrated runs provide relative disparity structure only, not metric depth.
+- End-user design assumption: self-calibration is required for practical usage; board-based ChArUco calibration remains an optional higher-quality path, not the only supported path.
+- Immediate next milestone is calibrated fixed-rig validation on local clips, not more YouTube/demo-profile iteration unless needed to debug regressions.
