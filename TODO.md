@@ -37,8 +37,11 @@
   - inspect why ascended surfels drift farther from the promoted cloud than plateau despite stricter state
   - keep the surfel anchor on a real observed point and verify centroid drift separately
   - keep surfel merges cross-frame only; same-frame neighboring points were the main source of false temporal support
-  - next verifier step should separate singleton plateau surfels from true multi-frame plateau candidates, because the current plateau bucket is dominated by exact singletons with zero centroid residual
-  - only resume densification once the multi-frame promoted surfel core is measurably tighter than the relevant non-promoted multi-frame comparison set
+- The verifier now separates singleton plateau surfels from the true non-promoted multi-frame comparison set; on `outputs/surfel_expand24_crossframe_v1`, ascended centroid residual (`0.0024`) is better than non-promoted multi-frame centroid residual (`0.0233`), so controlled densification is unblocked from this baseline.
+- Next surfel work should be one-knob densification from the cross-frame baseline:
+  - try a mild `tau_a` relaxation or `beta` increase on `outputs/surfel_expand24_crossframe_v1` semantics
+  - keep cross-frame-only merging and the multi-frame verifier comparison fixed
+  - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.
 - Tune evidence accumulation parameters (min_evidence_frames, weak_conf_scale, decay) for relative 3D stability.
 - Draft failure-handling heuristics for Regime B (low overlap, desync, rolling shutter) and choose refresh policy for extrinsics drift.

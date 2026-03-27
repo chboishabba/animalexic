@@ -67,3 +67,7 @@
   - `scripts/surfel_guard.py` now blocks same-frame merges, tracks both decayed `frame_hits` and integer `frame_count`, and uses frame count for ascension
   - on the fixed house segment, the new best cross-frame run (`outputs/surfel_expand24_crossframe_v1`) recovers 9 ascended surfels with much lower centroid drift (`0.0024` mean) than the earlier merged-surface attempts (`0.0164` / `0.0178`)
   - plateau remains dominated by exact singleton surfels with zero centroid residual, so the next surfel problem surface is verifier/governance for multi-frame surfels rather than more merge-threshold tuning
+- Refined `scripts/surfel_quality.py` so it compares ascended surfels against the correct support class:
+  - plateau is now split into singleton and multi-frame subsets
+  - the main comparison is `ascended` versus `nonpromoted_multiframe` rather than the raw plateau bucket
+  - on `outputs/surfel_expand24_crossframe_v1`, ascended centroid residual (`0.0024`) beats the non-promoted multi-frame set (`0.0233`), so controlled densification is now justified from the cross-frame baseline

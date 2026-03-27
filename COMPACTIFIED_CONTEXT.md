@@ -215,9 +215,13 @@
     - the best cross-frame validation on `outputs/surfel_expand24_crossframe_v1` found:
       - ascended count `9`
       - ascended centroid mean residual `0.0024`
-      - plateau centroid mean residual `0.0000`
+      - raw plateau centroid mean residual `0.0000`, but this bucket is all singleton surfels
       - grounded sample centroid mean residual `0.0032`
-    - this is a real improvement over the earlier merged-surface runs, but plateau is still dominated by exact singletons; the next surfel bottleneck is now verifier/governance for multi-frame surfels, not same-frame merge cleanup
+    - verifier refinement now splits plateau into singleton versus multi-frame support and compares ascended against the non-promoted multi-frame set
+    - on `outputs/surfel_quality_crossframe_v2`, the correct comparison is:
+      - ascended centroid mean residual `0.0024`
+      - non-promoted multi-frame centroid mean residual `0.0233`
+    - this means the cross-frame surfel baseline has passed its correctness gate; the next surfel bottleneck is controlled densification, not merge semantics
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
