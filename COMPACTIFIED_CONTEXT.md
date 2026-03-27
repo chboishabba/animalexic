@@ -180,6 +180,12 @@
       - plateau mean residual to promoted cloud: `0.3145`
       - grounded sample mean residual to promoted cloud: `49.1682`
     - this suggests ascended voxels are sparse and close to the promoted cloud, but not yet cleaner than plateau on the current thresholds
+  - a first controlled guard sweep raised `h_a` from `2` to `3`:
+    - `outputs/voxel_expand24_exact24_ha3`
+    - ascended count dropped from `26` to `20`
+    - plateau count rose from `23` to `29`
+    - ascended mean residual moved to `0.3585` while plateau mean residual moved to `0.3051`
+    - this did not improve quality, so the next one-knob attempt should not keep lowering `tau_a`; another persistence or temporal-weighting adjustment is more likely than a direct threshold drop
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

@@ -61,6 +61,7 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 ## Immediate actions (next 3 working sessions)
 - Verify the ascended voxel set from the exact guarded downstream path before changing any guard parameters: overlay ascended voxels on the promoted point cloud, and measure nearest-promoted-point residuals versus plateau/grounded voxels.
 - The first verifier pass is in place (`scripts/voxel_quality.py`); it shows ascended voxels are still slightly noisier than plateau on nearest-promoted-cloud residuals, so the next guard tuning should start with `h_a` rather than lowering `tau_a`.
+- The first `h_a` bump (`2 -> 3`) reduced ascended count (`26 -> 20`) but made ascended residual slightly worse (`0.3379 -> 0.3585`), so the next guard knob should likely be temporal weighting (`beta`) or another persistence adjustment rather than lowering `tau_a`.
 - If the ascended set is coherent, tune only one guard knob at a time:
   - first try increasing temporal persistence (`h_a`)
   - if needed, then lower `tau_a` slightly

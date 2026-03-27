@@ -50,3 +50,4 @@
   - the guard now uses `grounded` / `plateau` / `ascended` plus the residual constraint `rho_t(v) <= epsilon_rho`
   - the lossless 24-frame validation run on `outputs/runtime_npbi_expand24_lossless` at `stride=16` produced `23` plateau voxels and `26` ascended voxels in `outputs/voxel_expand24_exact24`
 - Added `scripts/voxel_quality.py` to verify the ascended voxel set against the promoted point cloud. The first exact-24 validation run reported ascended residuals slightly worse than plateau (`0.3379` vs `0.3145`), so the next tuning step is to try `h_a` before lowering `tau_a`.
+- Ran the first controlled voxel-guard sweep with `h_a=3`. The sweep reduced ascended count from `26` to `20` but did not improve quality (`ascended residual 0.3585` vs plateau `0.3051`), so the next guard adjustment should consider temporal weighting (`beta`) rather than dropping `tau_a`.
