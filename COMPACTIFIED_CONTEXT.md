@@ -186,6 +186,9 @@
     - plateau count rose from `23` to `29`
     - ascended mean residual moved to `0.3585` while plateau mean residual moved to `0.3051`
     - this did not improve quality, so the next one-knob attempt should not keep lowering `tau_a`; another persistence or temporal-weighting adjustment is more likely than a direct threshold drop
+  - guard scoring now uses mean evidence and residual-weighted accumulation:
+    - `S_t = (E_t / max(H_t,1)) * (1 + beta * min(H_t, H_max))`
+    - per-ray contribution is also weighted by `exp(-rho / sigma_rho)`
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

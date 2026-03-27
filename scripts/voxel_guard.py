@@ -25,6 +25,7 @@ class VoxelGuardParams:
     h_a: float = 2.0
     epsilon_rho: float = 64.0
     ray_decay: float = 0.35
+    sigma_rho: float = 24.0
 
 
 @dataclass
@@ -187,7 +188,8 @@ def accumulate_candidate_voxels(
             ray_weights /= ray_sum
             base_weight = float(w) * float(origin_factor)
             for voxel, ray_weight in zip(voxels, ray_weights):
-                contrib = base_weight * float(ray_weight)
+                residual_weight = float(np.exp(-float(residual) / max(1e-6, float(params.sigma_rho))))
+                contrib = base_weight * float(ray_weight) * residual_weight
                 frame_evidence[voxel] += contrib
                 frame_residual_num[voxel] += contrib * float(residual)
                 frame_residual_den[voxel] += contrib
@@ -199,7 +201,8 @@ def accumulate_candidate_voxels(
         residual_num = float(params.alpha) * residual_num + frame_residual_num
         residual_den = float(params.alpha) * residual_den + frame_residual_den
 
-    score = evidence * (1.0 + float(params.beta) * np.minimum(temporal_hits, float(params.h_max)))
+    mean_evidence = evidence / np.maximum(temporal_hits, 1.0)
+    score = mean_evidence * (1.0 + float(params.beta) * np.minimum(temporal_hits, float(params.h_max)))
     residual = np.zeros_like(score, dtype=np.float32)
     valid_residual = residual_den > 1e-6
     residual[valid_residual] = residual_num[valid_residual] / residual_den[valid_residual]
