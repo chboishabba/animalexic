@@ -65,7 +65,12 @@
   - the current verified stop-state margin is about `+0.0089` (`0.0253 - 0.0164`)
   - next surfel work should switch from threshold tuning to structure extraction: build local surfel neighborhoods, fit PCA normals/curvature, and emit connected surface clusters from the existing ascended support
   - keep true RGB/object-centered overlay replay deferred until the runtime persists original color frames; the current overlay renderer is still forced to use rectified grayscale matcher inputs
-- Initial surfel clustering is now implemented in `scripts/surfel_cluster.py`; the next iteration should tune neighborhood/edge thresholds against visual/object coherence and decide whether plateau surfels should be admitted into the clustering pass.
+- Initial surfel clustering is now implemented in `scripts/surfel_cluster.py`; keep it as an inspection/debug layer, not the start of a bespoke surface-reconstruction stack.
+- Next reconstruction step should be a standard backend fed by our governed surfels:
+  - add a `scripts/surfel_to_open3d_poisson.py` path that exports positions, normals, and weights from the trusted surfel state
+  - start with ascended-only input, then compare against ascended+plateau as an explicit option
+  - treat normal orientation consistency and confidence/weight usage as the main open questions, not custom triangle-building logic
+- `scripts/surfel_to_open3d_poisson.py` now exists and its export path is validated; the current blocker for full Poisson meshing in this repo environment is simply that `open3d` is not installed.
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.

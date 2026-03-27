@@ -107,3 +107,6 @@
   - `scripts/surfel_cluster.py` builds local surfel neighborhoods, fits PCA normals/curvature, forms connected components under distance/normal/curvature constraints, and emits colored cluster outputs
   - initial run on `outputs/surfel_earlystop_long_probe` produces `5` retained clusters from `141` ascended surfels, with `61` surfels left as noise under the default thresholds
   - this establishes the next surface-building layer without changing the governed surfel accumulation path itself
+- Added the first standard-backend reconstruction bridge:
+  - `scripts/surfel_to_open3d_poisson.py` exports governed surfels as oriented weighted points and, when Open3D is available, runs Poisson reconstruction plus density-based mesh filtering
+  - validation on `outputs/surfel_earlystop_long_probe` succeeded for the export path; the current environment does not have `open3d` installed, so the script writes `oriented_points.xyzwn`, `oriented_points_weighted.ply`, and `poisson_summary.json` but skips mesh generation cleanly

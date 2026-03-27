@@ -282,6 +282,13 @@
     - that clustering step is now present:
       - `scripts/surfel_cluster.py` clusters the current surfel state using local PCA normals/curvature plus connected components
       - the first run on `outputs/surfel_earlystop_long_probe` yields `5` retained clusters from `141` ascended surfels, with `61` surfels rejected as noise under the default thresholds
+    - reconstruction boundary has been clarified:
+      - governed surfel generation remains repo-owned
+      - `scripts/surfel_cluster.py` is for inspection/debugging only
+      - dense surface reconstruction should now use a standard backend (Open3D Poisson first) driven by exported oriented surfels plus weights
+    - that backend bridge is now present:
+      - `scripts/surfel_to_open3d_poisson.py` exports oriented weighted surfels and can run Open3D Poisson when available
+      - current environment does not have `open3d` installed, so the validated behavior is export-only (`oriented_points.xyzwn`, weighted PLY, summary JSON) with clean mesh-generation deferral
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
