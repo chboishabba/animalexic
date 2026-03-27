@@ -57,6 +57,11 @@
   - `min_new_ascended=1`
   - `min_residual_improvement=0.0` when using `residual_margin_improvement`
   - `max_scene_change=0.90` as a secondary confirmation only, not a stop trigger by itself
+- First longer same-object ingest run is now complete:
+  - `outputs/runtime_npbi_expand72_lossless` yielded `42` usable runtime frames
+  - `outputs/surfel_earlystop_long_probe` stopped at frame `31` under the current policy
+  - `outputs/surfel_quality_earlystop_long_probe/surfel_quality.json` still shows a positive verified centroid margin of `+0.01171`
+- Treat frame `31` as the current measured ingest horizon for this source/config until a better object-aware metric replaces the present merge/quality proxy.
   - next knob should be a depth-consistency gate or another merge-geometry refinement from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50`, `pos_eps=0.15` baseline
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set

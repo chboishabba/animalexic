@@ -274,6 +274,8 @@
       - the per-frame quality metric is now `residual_margin = nonpromoted_multiframe_mean_residual - ascended_mean_residual`
       - the offline verifier exposes the corresponding promoted-state metric as `governance.centroid_margin_vs_nonpromoted_multiframe`
       - current verified baseline margin on the preferred 24-frame run is `+0.00965`
+      - extending the same source/config beyond 24 frames produces `42` usable runtime frames and the current stop policy halts surfel accumulation at frame `31`
+      - that stopped state still passes the offline verifier with centroid margin `+0.01171` (`0.0266 - 0.0148`)
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

@@ -99,3 +99,7 @@
   - `scripts/promoted_depth_to_surfel.py` now records `nonpromoted_multiframe_mean_residual`, `residual_margin`, and `residual_margin_improvement` per frame
   - `scripts/surfel_quality.py` now emits `governance.centroid_margin_vs_nonpromoted_multiframe`
   - on the current preferred 24-frame baseline, the final verified centroid margin is `0.00965` (`0.0236 - 0.0140`), so longer ingest should preserve a positive margin rather than optimize counts alone
+- Extended the same source segment beyond the original 24-frame cap and exercised the new stop law on the longer calibrated runtime:
+  - the longer calibrated run produced `42` usable runtime frames before decode exhaustion
+  - with the current stop policy (`window=4`, `min_frames_before_stop=12`, `min_ascended_before_stop=20`, `min_new_ascended=1`, `min_residual_improvement=0.0`), surfel accumulation stops at frame `31`
+  - the stopped state still passes the offline governance check: `ascended_mean=0.0148`, `nonpromoted_multiframe_mean=0.0266`, verified centroid margin `+0.01171`
