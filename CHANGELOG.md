@@ -89,3 +89,5 @@
   - wider merge radii increased the size and error of the non-promoted multi-frame set faster than they improved the promoted set, so the next surfel surface is another geometry-aware merge constraint rather than a broader spatial radius
 - Added `scripts/render_surfel_webm.py` to generate a viewable rotating `.webm` from a saved `surfels_state.npz` using OpenCV frame rendering plus `ffmpeg`.
 - Rendered the current best surfel baseline to `outputs/surfel_poseps_015_baseline/surfel_cloud.webm` so the densified spatial state can be inspected without a separate point-cloud viewer.
+- Added incremental snapshot export to `scripts/promoted_depth_to_surfel.py` via `--save-snapshots` and `scripts/render_surfel_replay_webm.py` to turn those snapshots into a true time-evolving replay.
+- Rendered the first 4D-style replay for the current preferred baseline to `outputs/surfel_replay_baseline/surfel_replay.webm`.

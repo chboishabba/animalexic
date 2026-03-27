@@ -263,6 +263,10 @@
     - a viewable export path now exists:
       - `scripts/render_surfel_webm.py` renders a rotating `.webm` directly from `surfels_state.npz`
       - current artifact for the preferred baseline: `outputs/surfel_poseps_015_baseline/surfel_cloud.webm`
+    - a true replay export path now also exists:
+      - `scripts/promoted_depth_to_surfel.py --save-snapshots` writes compact per-frame surfel-state snapshots
+      - `scripts/render_surfel_replay_webm.py` renders those snapshots into a time-evolving `.webm`
+      - current artifact for the preferred baseline: `outputs/surfel_replay_baseline/surfel_replay.webm`
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

@@ -16,7 +16,10 @@ from surfel_guard import (
     SURFEL_PLATEAU,
     SurfelGuardParams,
     accumulate_candidate_surfels,
+    accumulate_frame_into_surfels,
     guard_surfels,
+    init_surfel_store,
+    save_surfel_state,
     write_colored_ply_ascii,
     write_points_ply_ascii,
 )
@@ -146,6 +149,8 @@ def main() -> None:
     ap.add_argument("--spread-max", type=float, default=0.08)
     ap.add_argument("--drift-sigma", type=float, default=0.05)
     ap.add_argument("--drift-max", type=float, default=0.05)
+    ap.add_argument("--save-snapshots", action="store_true")
+    ap.add_argument("--snapshots-dir", type=Path)
     ap.add_argument("--save-ply", action="store_true")
     args = ap.parse_args()
 
@@ -236,28 +241,23 @@ def main() -> None:
         drift_sigma=float(args.drift_sigma),
         drift_max=float(args.drift_max),
     )
-    surfels = accumulate_candidate_surfels(frame_points, frame_weights, frame_residuals, params)
-    states = guard_surfels(surfels, params)
+    snapshots_dir = args.snapshots_dir or (args.output_dir / "surfels_snapshots")
+    if args.save_snapshots:
+        snapshots_dir.mkdir(parents=True, exist_ok=True)
+        surfels, grid = init_surfel_store()
+        for frame_idx, (points_xyz, weights, residuals) in enumerate(zip(frame_points, frame_weights, frame_residuals)):
+            accumulate_frame_into_surfels(surfels, grid, frame_idx, points_xyz, weights, residuals, params)
+            states = guard_surfels(surfels, params)
+            save_surfel_state(snapshots_dir / f"surfels_state_f{frame_idx:04d}.npz", surfels, states)
+    else:
+        surfels = accumulate_candidate_surfels(frame_points, frame_weights, frame_residuals, params)
+        states = guard_surfels(surfels, params)
 
     asc_mask = np.array([s == SURFEL_ASCENDED for s in states], dtype=np.uint8)
     plat_mask = np.array([s == SURFEL_PLATEAU for s in states], dtype=np.uint8)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        args.output_dir / "surfels_state.npz",
-        pos=np.stack([s["pos"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
-        centroid=np.stack([s.get("centroid", s["pos"]) for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
-        normal=np.stack([s["normal"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
-        weight=np.array([s["weight"] for s in surfels], dtype=np.float32),
-        hits=np.array([s["hits"] for s in surfels], dtype=np.float32),
-        frame_hits=np.array([s.get("frame_hits", s["hits"]) for s in surfels], dtype=np.float32),
-        frame_count=np.array([s.get("frame_count", 1) for s in surfels], dtype=np.int32),
-        obs_count=np.array([s.get("obs_count", s["hits"]) for s in surfels], dtype=np.float32),
-        residual=np.array([s["residual"] for s in surfels], dtype=np.float32),
-        residual_ema=np.array([s.get("residual_ema", s["residual"]) for s in surfels], dtype=np.float32),
-        support_spread=np.array([s.get("support_spread", 0.0) for s in surfels], dtype=np.float32),
-        states=np.array(states, dtype=np.uint8),
-    )
+    save_surfel_state(args.output_dir / "surfels_state.npz", surfels, states)
 
     summary = {
         "runtime_dir": str(args.runtime_dir),
@@ -270,6 +270,9 @@ def main() -> None:
         },
     }
     (args.output_dir / "surfels_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    if args.save_snapshots:
+        summary["snapshots_dir"] = str(snapshots_dir)
+        (args.output_dir / "surfels_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if args.save_ply and surfels:
         write_points_ply_ascii(args.output_dir / "surfels_all.ply", np.stack([s["pos"] for s in surfels]))
@@ -290,6 +293,8 @@ def main() -> None:
     print(
         f"[surfel] counts: grounded={summary['counts']['grounded']} plateau={summary['counts']['plateau']} ascended={summary['counts']['ascended']}"
     )
+    if args.save_snapshots:
+        print(f"[surfel] wrote snapshots: {snapshots_dir}")
 
 
 if __name__ == "__main__":

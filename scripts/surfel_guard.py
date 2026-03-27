@@ -47,91 +47,105 @@ def _angle_between(n1: np.ndarray, n2: np.ndarray) -> float:
     return float(np.arccos(d)) if -1.0 <= d <= 1.0 else np.pi
 
 
+def init_surfel_store() -> tuple[list[dict], dict[Tuple[int, int, int], list[int]]]:
+    return [], {}
+
+
+def accumulate_frame_into_surfels(
+    surfels: list[dict],
+    grid: dict[Tuple[int, int, int], list[int]],
+    frame_idx: int,
+    points_xyz: np.ndarray,
+    weights: np.ndarray,
+    residuals: np.ndarray,
+    params: SurfelGuardParams,
+) -> None:
+    if len(points_xyz) == 0:
+        return
+    for pos, w, residual in zip(points_xyz, weights, residuals):
+        if w <= 0:
+            continue
+        n = pos.astype(np.float32)
+        norm = float(np.linalg.norm(n))
+        if norm > 1e-6:
+            n /= norm
+        else:
+            n = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+        key = _cell_key(pos, params.cell_size)
+        best_idx = None
+        best_dist = float(params.pos_eps)
+        for dk in ((dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)):
+            nk = (key[0] + dk[0], key[1] + dk[1], key[2] + dk[2])
+            for idx in grid.get(nk, []):
+                s = surfels[idx]
+                if int(s.get("last_frame", -1)) == int(frame_idx):
+                    continue
+                dist = float(np.linalg.norm(pos - s["pos"]))
+                if dist < best_dist:
+                    ang = _angle_between(n, s["normal"])
+                    if ang <= float(params.normal_eps):
+                        best_dist = dist
+                        best_idx = idx
+
+        residual_weight = float(np.exp(-float(residual) / max(1e-6, float(params.sigma_rho))))
+        contrib = float(w) * residual_weight
+        if best_idx is None:
+            idx = len(surfels)
+            surfels.append(
+                {
+                    "pos": pos.astype(np.float32),
+                    "centroid": pos.astype(np.float32),
+                    "normal": n.astype(np.float32),
+                    "weight": contrib,
+                    "hits": 1.0,
+                    "frame_hits": 1.0,
+                    "frame_count": 1,
+                    "obs_count": 1.0,
+                    "last_frame": int(frame_idx),
+                    "residual": float(residual),
+                    "residual_ema": float(residual),
+                    "support_spread": 0.0,
+                }
+            )
+            grid.setdefault(key, []).append(idx)
+        else:
+            s = surfels[best_idx]
+            total_w = s["weight"] + contrib
+            if total_w <= 1e-6:
+                continue
+            merge_dist = float(np.linalg.norm(pos - s["pos"]))
+            s["centroid"] = (s["centroid"] * s["weight"] + pos * contrib) / total_w
+            s["normal"] = s["normal"] * s["weight"] + n * contrib
+            n_norm = float(np.linalg.norm(s["normal"]))
+            if n_norm > 1e-6:
+                s["normal"] /= n_norm
+            s["weight"] = float(params.alpha) * s["weight"] + contrib
+            s["obs_count"] = float(params.alpha_h) * s["obs_count"] + 1.0
+            if int(s.get("last_frame", -1)) != int(frame_idx):
+                s["frame_hits"] = float(params.alpha_h) * s["frame_hits"] + 1.0
+                s["frame_count"] = int(s.get("frame_count", 1)) + 1
+                s["last_frame"] = int(frame_idx)
+            if float(residual) <= float(s["residual"]):
+                # Keep the surfel anchored to the best-supported observed surface point
+                # instead of drifting the output position toward an off-surface centroid.
+                s["pos"] = pos.astype(np.float32)
+            s["residual"] = min(s["residual"], float(residual))
+            s["residual_ema"] = (
+                float(params.alpha) * s["residual_ema"] + (1.0 - float(params.alpha)) * float(residual)
+            )
+            s["support_spread"] = max(float(s["support_spread"]), merge_dist)
+
+
 def accumulate_candidate_surfels(
     frame_points: Iterable[np.ndarray],
     frame_weights: Iterable[np.ndarray],
     frame_residuals: Iterable[np.ndarray],
     params: SurfelGuardParams,
 ) -> list[dict]:
-    surfels: List[dict] = []
-    grid: dict[Tuple[int, int, int], List[int]] = {}
-
+    surfels, grid = init_surfel_store()
     for frame_idx, (points_xyz, weights, residuals) in enumerate(zip(frame_points, frame_weights, frame_residuals)):
-        if len(points_xyz) == 0:
-            continue
-        for pos, w, residual in zip(points_xyz, weights, residuals):
-            if w <= 0:
-                continue
-            n = pos.astype(np.float32)
-            norm = float(np.linalg.norm(n))
-            if norm > 1e-6:
-                n /= norm
-            else:
-                n = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-
-            key = _cell_key(pos, params.cell_size)
-            best_idx = None
-            best_dist = float(params.pos_eps)
-            for dk in ((dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)):
-                nk = (key[0] + dk[0], key[1] + dk[1], key[2] + dk[2])
-                for idx in grid.get(nk, []):
-                    s = surfels[idx]
-                    if int(s.get("last_frame", -1)) == int(frame_idx):
-                        continue
-                    dist = float(np.linalg.norm(pos - s["pos"]))
-                    if dist < best_dist:
-                        ang = _angle_between(n, s["normal"])
-                        if ang <= float(params.normal_eps):
-                            best_dist = dist
-                            best_idx = idx
-
-            residual_weight = float(np.exp(-float(residual) / max(1e-6, float(params.sigma_rho))))
-            contrib = float(w) * residual_weight
-            if best_idx is None:
-                idx = len(surfels)
-                surfels.append(
-                    {
-                        "pos": pos.astype(np.float32),
-                        "centroid": pos.astype(np.float32),
-                        "normal": n.astype(np.float32),
-                        "weight": contrib,
-                        "hits": 1.0,
-                        "frame_hits": 1.0,
-                        "frame_count": 1,
-                        "obs_count": 1.0,
-                        "last_frame": int(frame_idx),
-                        "residual": float(residual),
-                        "residual_ema": float(residual),
-                        "support_spread": 0.0,
-                    }
-                )
-                grid.setdefault(key, []).append(idx)
-            else:
-                s = surfels[best_idx]
-                total_w = s["weight"] + contrib
-                if total_w <= 1e-6:
-                    continue
-                merge_dist = float(np.linalg.norm(pos - s["pos"]))
-                s["centroid"] = (s["centroid"] * s["weight"] + pos * contrib) / total_w
-                s["normal"] = s["normal"] * s["weight"] + n * contrib
-                n_norm = float(np.linalg.norm(s["normal"]))
-                if n_norm > 1e-6:
-                    s["normal"] /= n_norm
-                s["weight"] = float(params.alpha) * s["weight"] + contrib
-                s["obs_count"] = float(params.alpha_h) * s["obs_count"] + 1.0
-                if int(s.get("last_frame", -1)) != int(frame_idx):
-                    s["frame_hits"] = float(params.alpha_h) * s["frame_hits"] + 1.0
-                    s["frame_count"] = int(s.get("frame_count", 1)) + 1
-                    s["last_frame"] = int(frame_idx)
-                if float(residual) <= float(s["residual"]):
-                    # Keep the surfel anchored to the best-supported observed surface point
-                    # instead of drifting the output position toward an off-surface centroid.
-                    s["pos"] = pos.astype(np.float32)
-                s["residual"] = min(s["residual"], float(residual))
-                s["residual_ema"] = (
-                    float(params.alpha) * s["residual_ema"] + (1.0 - float(params.alpha)) * float(residual)
-                )
-                s["support_spread"] = max(float(s["support_spread"]), merge_dist)
+        accumulate_frame_into_surfels(surfels, grid, frame_idx, points_xyz, weights, residuals, params)
     return surfels
 
 
@@ -165,6 +179,25 @@ def guard_surfels(surfels: List[dict], params: SurfelGuardParams) -> list[int]:
             state = SURFEL_ASCENDED
         states.append(state)
     return states
+
+
+def save_surfel_state(path: Path, surfels: list[dict], states: list[int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        pos=np.stack([s["pos"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
+        centroid=np.stack([s.get("centroid", s["pos"]) for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
+        normal=np.stack([s["normal"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
+        weight=np.array([s["weight"] for s in surfels], dtype=np.float32),
+        hits=np.array([s["hits"] for s in surfels], dtype=np.float32),
+        frame_hits=np.array([s.get("frame_hits", s["hits"]) for s in surfels], dtype=np.float32),
+        frame_count=np.array([s.get("frame_count", 1) for s in surfels], dtype=np.int32),
+        obs_count=np.array([s.get("obs_count", s["hits"]) for s in surfels], dtype=np.float32),
+        residual=np.array([s["residual"] for s in surfels], dtype=np.float32),
+        residual_ema=np.array([s.get("residual_ema", s["residual"]) for s in surfels], dtype=np.float32),
+        support_spread=np.array([s.get("support_spread", 0.0) for s in surfels], dtype=np.float32),
+        states=np.array(states, dtype=np.uint8),
+    )
 
 
 def write_points_ply_ascii(path: Path, points_xyz: np.ndarray) -> None:
