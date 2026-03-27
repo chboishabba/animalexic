@@ -291,6 +291,7 @@ def main() -> None:
 
     if nonpromoted_multi_centroid_stats["count"] > 0:
         asc_better = asc_centroid_stats["mean"] < nonpromoted_multi_centroid_stats["mean"]
+        centroid_margin = nonpromoted_multi_centroid_stats["mean"] - asc_centroid_stats["mean"]
         recommendation = (
             "ascended surfels are tighter than the non-promoted multi-frame support set; proceed with controlled densification"
             if asc_better
@@ -298,6 +299,7 @@ def main() -> None:
         )
     else:
         asc_better = False
+        centroid_margin = None
         recommendation = "no non-promoted multi-frame comparison set exists yet; keep current guard and grow only after another candidate class appears"
     summary = {
         "runtime_dir": str(args.runtime_dir),
@@ -341,6 +343,10 @@ def main() -> None:
             "grounded_multiframe": _stats(support_spread[ground_multi_mask]),
             "nonpromoted_multiframe": _stats(support_spread[nonpromoted_multi_mask]),
             "grounded_sample": _stats(grounded_spread_eval),
+        },
+        "governance": {
+            "ascended_beats_nonpromoted_multiframe": bool(asc_better),
+            "centroid_margin_vs_nonpromoted_multiframe": centroid_margin,
         },
         "recommendation": recommendation,
     }

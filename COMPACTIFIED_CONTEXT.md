@@ -271,6 +271,9 @@
       - `scripts/promoted_depth_to_surfel.py` writes per-frame gain/quality stats to `surfels_frame_stats.json`
       - optional controls: `--early-stop-window`, `--min-frames-before-stop`, `--min-ascended-before-stop`, `--min-new-ascended`, `--min-residual-improvement`, `--max-scene-change`
       - on the current preferred 24-frame lossless clip, the guarded stop rule does not fire once warmup/support gates are applied; useful structure is still being added through frame `23`
+      - the per-frame quality metric is now `residual_margin = nonpromoted_multiframe_mean_residual - ascended_mean_residual`
+      - the offline verifier exposes the corresponding promoted-state metric as `governance.centroid_margin_vs_nonpromoted_multiframe`
+      - current verified baseline margin on the preferred 24-frame run is `+0.00965`
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

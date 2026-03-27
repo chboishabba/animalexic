@@ -95,3 +95,7 @@
   - per-frame stats now record `new_ascended`, `merge_accept_rate`, residual improvement, and a simple scene-change proxy in `surfels_frame_stats.json`
   - optional stop controls were added: `--early-stop-window`, `--min-frames-before-stop`, `--min-ascended-before-stop`, `--min-new-ascended`, `--min-residual-improvement`, `--max-scene-change`
   - on the current preferred 24-frame lossless clip, the guarded stop rule does **not** trigger early once warmup/support gates are enforced; the object is still adding useful structure through frame `23`
+- Refined the stop metrics from raw ascended residual to a governed residual margin:
+  - `scripts/promoted_depth_to_surfel.py` now records `nonpromoted_multiframe_mean_residual`, `residual_margin`, and `residual_margin_improvement` per frame
+  - `scripts/surfel_quality.py` now emits `governance.centroid_margin_vs_nonpromoted_multiframe`
+  - on the current preferred 24-frame baseline, the final verified centroid margin is `0.00965` (`0.0236 - 0.0140`), so longer ingest should preserve a positive margin rather than optimize counts alone

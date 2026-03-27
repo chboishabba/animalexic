@@ -46,6 +46,17 @@
   - merge-radius sweep from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50` baseline is also complete; tightening to `pos_eps=0.15` yields `165` ascended surfels with centroid residual `0.0140` versus `0.0236` for the non-promoted multi-frame set
 - Early-stop instrumentation is now in place on the surfel path. Use `surfels_frame_stats.json` plus the new CLI stop controls to decide ingest length from measured marginal gain instead of a fixed frame cap.
 - On the current 24-frame lossless segment, the stop rule does not trigger once warmup/support gates are applied; that means the clip is still adding useful structure through the end, so the next extension should be a longer same-object segment rather than a shorter cutoff.
+- Use residual margin, not raw ascended residual, as the quality metric for longer ingest:
+  - online proxy in `surfels_frame_stats.json`: `residual_margin = nonpromoted_multiframe_mean_residual - ascended_mean_residual`
+  - offline verifier in `surfel_quality.json`: `governance.centroid_margin_vs_nonpromoted_multiframe`
+  - current verified baseline margin is `+0.00965`; reject any longer ingest run that drives this margin non-positive
+- Suggested initial stop thresholds for a longer same-object run:
+  - `early_stop_window=4`
+  - `min_frames_before_stop=12`
+  - `min_ascended_before_stop=20`
+  - `min_new_ascended=1`
+  - `min_residual_improvement=0.0` when using `residual_margin_improvement`
+  - `max_scene_change=0.90` as a secondary confirmation only, not a stop trigger by itself
   - next knob should be a depth-consistency gate or another merge-geometry refinement from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50`, `pos_eps=0.15` baseline
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set

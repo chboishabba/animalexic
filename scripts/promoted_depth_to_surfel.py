@@ -254,7 +254,7 @@ def main() -> None:
     surfels, grid = init_surfel_store()
     frame_stats: list[dict[str, float | int | bool]] = []
     prev_ascended = 0
-    prev_ascended_mean_residual: float | None = None
+    prev_residual_margin: float | None = None
     stopped_early = False
     stop_reason = ""
     processed_frame_indices: list[int] = []
@@ -270,10 +270,21 @@ def main() -> None:
         grounded_count = int(np.count_nonzero(state_arr == SURFEL_GROUNDED))
         new_ascended = ascended_count - prev_ascended
         ascended_residuals = [float(surfels[idx]["residual_ema"]) for idx, st in enumerate(states) if st == SURFEL_ASCENDED]
+        nonpromoted_multiframe_residuals = [
+            float(surfels[idx]["residual_ema"])
+            for idx, st in enumerate(states)
+            if st != SURFEL_ASCENDED and int(surfels[idx].get("frame_count", 1)) >= 2
+        ]
         ascended_mean_residual = float(mean(ascended_residuals)) if ascended_residuals else None
-        residual_improvement = 0.0
-        if prev_ascended_mean_residual is not None and ascended_mean_residual is not None:
-            residual_improvement = prev_ascended_mean_residual - ascended_mean_residual
+        nonpromoted_multiframe_mean_residual = (
+            float(mean(nonpromoted_multiframe_residuals)) if nonpromoted_multiframe_residuals else None
+        )
+        residual_margin = None
+        if ascended_mean_residual is not None and nonpromoted_multiframe_mean_residual is not None:
+            residual_margin = nonpromoted_multiframe_mean_residual - ascended_mean_residual
+        residual_margin_improvement = 0.0
+        if prev_residual_margin is not None and residual_margin is not None:
+            residual_margin_improvement = residual_margin - prev_residual_margin
         scene_change_score = 1.0 - float(acc_stats["merge_accept_rate"])
         if float(acc_stats["mean_merge_dist"]) > 0.0 and float(params.pos_eps) > 1e-6:
             scene_change_score = min(
@@ -297,7 +308,9 @@ def main() -> None:
             "ascended": ascended_count,
             "new_ascended": int(new_ascended),
             "ascended_mean_residual": ascended_mean_residual,
-            "residual_improvement": float(residual_improvement),
+            "nonpromoted_multiframe_mean_residual": nonpromoted_multiframe_mean_residual,
+            "residual_margin": residual_margin,
+            "residual_margin_improvement": float(residual_margin_improvement),
             "scene_change_score": float(scene_change_score),
             "stop_candidate": False,
         }
@@ -307,8 +320,8 @@ def main() -> None:
         if args.save_snapshots:
             save_surfel_state(snapshots_dir / f"surfels_state_f{frame_idx:04d}.npz", surfels, states)
 
-        if ascended_mean_residual is not None:
-            prev_ascended_mean_residual = ascended_mean_residual
+        if residual_margin is not None:
+            prev_residual_margin = residual_margin
         prev_ascended = ascended_count
 
         if (
@@ -318,7 +331,7 @@ def main() -> None:
         ):
             window = frame_stats[-int(args.early_stop_window):]
             avg_new_asc = float(mean(float(r["new_ascended"]) for r in window))
-            avg_improvement = float(mean(float(r["residual_improvement"]) for r in window))
+            avg_improvement = float(mean(float(r["residual_margin_improvement"]) for r in window))
             avg_scene_change = float(mean(float(r["scene_change_score"]) for r in window))
             low_gain = avg_new_asc < float(args.min_new_ascended) and avg_improvement < float(args.min_residual_improvement)
             scene_break = avg_scene_change > float(args.max_scene_change)
