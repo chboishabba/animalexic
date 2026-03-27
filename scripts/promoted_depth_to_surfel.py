@@ -70,17 +70,17 @@ def _reproject_points_from_disp(
     stride: int,
     max_depth: float,
     min_disp: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ys, xs = np.nonzero(promoted_mask)
     if ys.size == 0:
-        return np.zeros((0, 3), dtype=np.float32)
+        return (np.zeros((0, 3), dtype=np.float32), ys, xs)
     ys = ys[:: max(1, stride)]
     xs = xs[:: max(1, stride)]
 
     disp = disp_map[ys, xs].astype(np.float32)
     valid_disp = disp >= float(min_disp)
     if not np.any(valid_disp):
-        return np.zeros((0, 3), dtype=np.float32)
+        return (np.zeros((0, 3), dtype=np.float32), ys, xs)
 
     ys = ys[valid_disp]
     xs = xs[valid_disp]
@@ -100,13 +100,13 @@ def _reproject_points_from_disp(
     w = homog[3]
     good = np.abs(w) > 1e-6
     if not np.any(good):
-        return np.zeros((0, 3), dtype=np.float32)
+        return (np.zeros((0, 3), dtype=np.float32), ys, xs)
 
     xyz = (homog[:3, good] / w[good]).T.astype(np.float32)
     finite = np.isfinite(xyz).all(axis=1)
     xyz = xyz[finite]
     if xyz.size == 0:
-        return np.zeros((0, 3), dtype=np.float32)
+        return (np.zeros((0, 3), dtype=np.float32), ys, xs)
 
     if np.mean(xyz[:, 2]) < 0.0:
         xyz[:, 2] *= -1.0
@@ -114,7 +114,10 @@ def _reproject_points_from_disp(
     if max_depth > 0:
         depth_ok &= xyz[:, 2] <= float(max_depth)
     xyz = xyz[depth_ok]
-    return xyz.astype(np.float32)
+    # keep pixel coordinates aligned with filtered points
+    ys = ys[depth_ok]
+    xs = xs[depth_ok]
+    return (xyz.astype(np.float32), ys, xs)
 
 
 def main() -> None:
@@ -129,13 +132,13 @@ def main() -> None:
     ap.add_argument("--cell-size", type=float, default=0.25)
     ap.add_argument("--pos-eps", type=float, default=0.20)
     ap.add_argument("--normal-eps", type=float, default=0.52)
+    ap.add_argument("--tau-p", type=float, default=0.5)
+    ap.add_argument("--tau-a", type=float, default=1.0)
+    ap.add_argument("--h-a", type=float, default=2.0)
     ap.add_argument("--alpha", type=float, default=0.85)
     ap.add_argument("--alpha-h", dest="alpha_h", type=float, default=0.90)
     ap.add_argument("--beta", type=float, default=0.35)
     ap.add_argument("--h-max", dest="h_max", type=float, default=8.0)
-    ap.add_argument("--tau-p", type=float, default=0.5)
-    ap.add_argument("--tau-a", type=float, default=1.0)
-    ap.add_argument("--h-a", type=float, default=2.0)
     ap.add_argument("--epsilon-rho", type=float, default=64.0)
     ap.add_argument("--sigma-rho", type=float, default=24.0)
     ap.add_argument("--gamma-neighbor", dest="gamma_neighbor", type=float, default=0.20)
@@ -157,7 +160,7 @@ def main() -> None:
         cost_map = _load_gray(args.runtime_dir / f"candidate_cost_f{frame_idx:04d}.png")
         if promoted_pack is not None:
             canonical_disp_q8, promoted_mask, _ = promoted_pack
-            points_xyz = _reproject_points_from_disp(
+            points_xyz, ys_used, xs_used = _reproject_points_from_disp(
                 (canonical_disp_q8.astype(np.float32) / 256.0),
                 promoted_mask,
                 artifact.q_matrix,
@@ -170,7 +173,7 @@ def main() -> None:
             canonical_disp = _load_gray(args.runtime_dir / f"canonical_disp_f{frame_idx:04d}.png")
             if promoted_mask is None or canonical_disp is None:
                 continue
-            points_xyz = _reproject_points_from_disp(
+            points_xyz, ys_used, xs_used = _reproject_points_from_disp(
                 canonical_disp,
                 promoted_mask,
                 artifact.q_matrix,
@@ -185,24 +188,23 @@ def main() -> None:
             frame_residuals.append(np.zeros((0,), dtype=np.float32))
             continue
 
-        conf_vals = conf_map[:, :][points_xyz.shape[0] * 0 : points_xyz.shape[0]] if conf_map is not None else None
-        grad_vals = grad_map[:, :][points_xyz.shape[0] * 0 : points_xyz.shape[0]] if grad_map is not None else None
-
-        # fallback: if maps exist use nearest-neighbor sampling via pixel rounding
-        if conf_map is not None:
-            # project back to pixel grid approximation
-            conf_vals = np.ones((len(points_xyz),), dtype=np.float32) * np.mean(conf_map) / 255.0
+        # sample evidence maps at the same pixels used for reprojection
+        if conf_map is not None and ys_used.size:
+            conf_vals = conf_map[ys_used, xs_used].astype(np.float32) / 255.0
         else:
             conf_vals = np.ones((len(points_xyz),), dtype=np.float32)
-        if grad_map is not None:
-            grad_vals = np.ones((len(points_xyz),), dtype=np.float32) * (0.5 + 0.5 * np.mean(grad_map) / 255.0)
+
+        if grad_map is not None and ys_used.size:
+            grad_vals = 0.5 + 0.5 * (grad_map[ys_used, xs_used].astype(np.float32) / 255.0)
         else:
             grad_vals = np.ones((len(points_xyz),), dtype=np.float32)
 
         weights = np.clip(conf_vals * grad_vals, 0.0, 1.0).astype(np.float32)
-        residuals = cost_map.flatten().astype(np.float32)[: len(points_xyz)] if cost_map is not None else np.zeros(
-            (len(points_xyz),), dtype=np.float32
-        )
+
+        if cost_map is not None and ys_used.size:
+            residuals = cost_map[ys_used, xs_used].astype(np.float32)
+        else:
+            residuals = np.zeros((len(points_xyz),), dtype=np.float32)
 
         frame_points.append(points_xyz)
         frame_weights.append(weights)

@@ -57,3 +57,4 @@
 - Added a surfel accumulation path:
   - `scripts/surfel_guard.py` implements surfel accumulation and guards mirroring the voxel path (mean evidence, residual weighting, beta/gamma neighbor term)
   - `scripts/promoted_depth_to_surfel.py` projects promoted depth into surfels and emits NPZ/PLY artifacts for inspection
+- Fixed the surfel projection CLI (duplicate arg definitions) and aligned weight/residual sampling to promoted pixels. First rerun on the lossless expand-24 segment (`surfel_expand24_beta035_gamma020_v2`, stride 8) produced a conservative but correct set of 5 ascended surfels (plateau 735, grounded 1754) with asc_mean < plat_mean preserved; next work is controlled densification.
