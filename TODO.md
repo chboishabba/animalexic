@@ -25,6 +25,11 @@
 - Rework the learned confidence path beyond the current balanced logistic baseline so it improves overlap over the heuristic decomposed-evidence path; candidate-only learned gating is not sufficient.
 - Lossless promoted-depth export is now wired (`promoted_depth_f*.npz`), but downstream geometry still needs to standardize on it everywhere and retire the PNG fallback once older artifact dirs are no longer needed.
 - Extend `scripts/promoted_depth_to_voxel.py` from a prototype into a real downstream operator: the exact guarded accumulation equations are now wired in, so the next step is to tune weighting/termination and decide whether surfels/splats should replace or complement voxel occupancy.
+- Add `scripts/voxel_quality.py` to verify the ascended voxel set before any guard sweep:
+  - overlay ascended voxels on the promoted point cloud
+  - measure nearest-promoted-point residuals for ascended vs plateau vs grounded voxels
+  - use the result to decide whether to increase `h_a` or lower `tau_a` next
+- Keep `h_a` as the first guard knob to try on the exact voxel path: the first verifier run shows ascended residuals are slightly worse than plateau (`0.3379` vs `0.3145`), so lowering `tau_a` should wait until `h_a` has been tested.
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.
 - Tune evidence accumulation parameters (min_evidence_frames, weak_conf_scale, decay) for relative 3D stability.
 - Draft failure-handling heuristics for Regime B (low overlap, desync, rolling shutter) and choose refresh policy for extrinsics drift.

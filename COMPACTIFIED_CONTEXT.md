@@ -169,6 +169,17 @@
     - ascended voxels: 26
   - this establishes the intended downstream seam:
     - `PromotedDepth -> CandidateVoxelHits -> VoxelGuard -> Promote/Abstain`
+  - the next step is verification, not broader densification:
+    - overlay ascended voxels on the promoted point cloud
+    - measure nearest-promoted-point residuals for ascended vs plateau vs grounded voxels
+    - if the ascended set is coherent, tune one guard knob at a time (`h_a` first, then `tau_a`)
+  - verification script now exists:
+    - `scripts/voxel_quality.py`
+    - first exact-24 validation on `outputs/voxel_expand24_exact24` found:
+      - ascended mean residual to promoted cloud: `0.3379`
+      - plateau mean residual to promoted cloud: `0.3145`
+      - grounded sample mean residual to promoted cloud: `49.1682`
+    - this suggests ascended voxels are sparse and close to the promoted cloud, but not yet cleaner than plateau on the current thresholds
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

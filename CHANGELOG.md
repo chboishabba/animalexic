@@ -49,3 +49,4 @@
   - temporal evidence/hit state uses `E_t` / `H_t` with persistence scoring `S_t`
   - the guard now uses `grounded` / `plateau` / `ascended` plus the residual constraint `rho_t(v) <= epsilon_rho`
   - the lossless 24-frame validation run on `outputs/runtime_npbi_expand24_lossless` at `stride=16` produced `23` plateau voxels and `26` ascended voxels in `outputs/voxel_expand24_exact24`
+- Added `scripts/voxel_quality.py` to verify the ascended voxel set against the promoted point cloud. The first exact-24 validation run reported ascended residuals slightly worse than plateau (`0.3379` vs `0.3145`), so the next tuning step is to try `h_a` before lowering `tau_a`.

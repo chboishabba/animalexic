@@ -59,6 +59,12 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 - Thermal throttling: monitor clocks; keep a lower-power profile for long runs.
 
 ## Immediate actions (next 3 working sessions)
+- Verify the ascended voxel set from the exact guarded downstream path before changing any guard parameters: overlay ascended voxels on the promoted point cloud, and measure nearest-promoted-point residuals versus plateau/grounded voxels.
+- The first verifier pass is in place (`scripts/voxel_quality.py`); it shows ascended voxels are still slightly noisier than plateau on nearest-promoted-cloud residuals, so the next guard tuning should start with `h_a` rather than lowering `tau_a`.
+- If the ascended set is coherent, tune only one guard knob at a time:
+  - first try increasing temporal persistence (`h_a`)
+  - if needed, then lower `tau_a` slightly
+- Keep the guarded voxel seam conservative until the quality check passes; do not add surfel/splat output before the voxel verifier shows the promoted 3D state is trustworthy.
 - Use the calibrated oracle as a teacher on source-aligned runs and optimize for overlap / agreement (`IoU`, false negatives, false positives), not coverage alone.
 - Improve candidate placement with richer evidence and region-level reasoning before attempting another learned promotion gate.
 - Keep learned confidence calibration opt-in until it beats the heuristic decomposed-evidence baseline on aligned compare metrics.
