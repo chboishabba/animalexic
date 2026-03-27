@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -27,9 +28,13 @@ def load_calibration_artifact(path: Path) -> CalibrationArtifact:
     path = Path(path)
     if path.suffix != ".npz":
         raise ValueError("calibration artifact must be a .npz file")
+    if not path.exists():
+        raise FileNotFoundError(f"missing calibration artifact: {path}")
     meta_path = path.with_suffix(".json")
     if not meta_path.exists():
-        raise FileNotFoundError(f"missing calibration metadata: {meta_path}")
+        raise FileNotFoundError(
+            f"missing calibration metadata: {meta_path} (expected companion .json next to {path})"
+        )
     blob = np.load(path)
     metadata = json.loads(meta_path.read_text())
     return CalibrationArtifact(
@@ -220,12 +225,152 @@ class TemporalMergeParams:
     smooth_alpha_strong: float = 0.65
     min_evidence_frames: int = 2
     weak_conf_scale: float = 0.7
+    region_min_pixels: int = 0
+    region_max_disp_std: float = 0.0
+    region_min_fill_ratio: float = 0.0
+    region_score_enable: bool = False
+    region_score_threshold_strong: float = 0.60
+    region_score_threshold_weak: float = 0.40
+    region_model_path: str | None = None
 
 
 def confidence_from_cost_gap(cost: np.ndarray, gap: np.ndarray, max_cost: float, good_gap: float = 10.0) -> np.ndarray:
     cost_term = np.clip(1.0 - (cost.astype(np.float32) / max_cost), 0.0, 1.0)
     gap_term = np.clip(gap.astype(np.float32) / good_gap, 0.0, 1.0)
     return np.clip(0.6 * cost_term + 0.4 * gap_term, 0.0, 1.0)
+
+
+_REGION_MODEL_CACHE: dict[str, dict] = {}
+
+
+def load_region_model(path: str | None):
+    if not path:
+        return None
+    if path not in _REGION_MODEL_CACHE:
+        _REGION_MODEL_CACHE[path] = json.loads(Path(path).read_text())
+    return _REGION_MODEL_CACHE[path]
+
+
+def score_region_from_model(region_stats: dict, model: dict | None) -> float:
+    if model is None:
+        return float(region_stats.get("conf_mean", 0.0))
+    if model.get("model_type") == "region_stump_v1":
+        feat_name = model["rule"]["feature_name"]
+        thresh = float(model["rule"]["threshold"])
+        val = float(region_stats.get(feat_name, 0.0))
+        return 1.0 if val >= thresh else 0.0
+    return float(region_stats.get("conf_mean", 0.0))
+
+
+def compute_region_stats(mask, cand_disp, cand_conf, cand_cost, evidence):
+    import cv2
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    rows = []
+    disp_f = cand_disp.astype(np.float32)
+    conf_f = cand_conf.astype(np.float32)
+    cost_f = cand_cost.astype(np.float32)
+
+    for label in range(1, num_labels):
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        w = int(stats[label, cv2.CC_STAT_WIDTH])
+        h = int(stats[label, cv2.CC_STAT_HEIGHT])
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        region = labels == label
+        if area <= 0:
+            continue
+        bbox = mask[y:y + h, x:x + w]
+        fill_ratio = float(np.mean(bbox > 0)) if bbox.size else 0.0
+        disp_vals = disp_f[region]
+        conf_vals = conf_f[region]
+        cost_vals = cost_f[region]
+        row = {
+            "label": int(label),
+            "mask": region,
+            "area_px": area,
+            "fill_ratio": fill_ratio,
+            "disp_mean": float(np.mean(disp_vals)) if disp_vals.size else 0.0,
+            "disp_std": float(np.std(disp_vals)) if disp_vals.size else 0.0,
+            "conf_mean": float(np.mean(conf_vals)) if conf_vals.size else 0.0,
+            "conf_std": float(np.std(conf_vals)) if conf_vals.size else 0.0,
+            "cost_mean": float(np.mean(cost_vals)) if cost_vals.size else 0.0,
+            "cost_std": float(np.std(cost_vals)) if cost_vals.size else 0.0,
+        }
+        if evidence is not None:
+            for key in ["lr_delta", "median_delta", "texture", "disp_gradient", "edge_distance", "border_penalty"]:
+                arr = evidence.get(key)
+                if arr is None:
+                    continue
+                vals = arr[region].astype(np.float32)
+                row[f"{key}_mean"] = float(np.mean(vals)) if vals.size else 0.0
+                row[f"{key}_std"] = float(np.std(vals)) if vals.size else 0.0
+        rows.append(row)
+    return rows
+
+
+def _filter_region_acceptance(
+    accept_mask: np.ndarray,
+    accept_close: np.ndarray,
+    cand_disp: np.ndarray,
+    cand_conf: np.ndarray,
+    cand_cost: np.ndarray,
+    params: TemporalMergeParams,
+    evidence_maps: Optional[dict[str, np.ndarray]] = None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    if not np.any(accept_mask):
+        empty = np.zeros_like(accept_mask, dtype=bool)
+        return accept_mask, empty, {
+            "region_components_total": 0,
+            "region_components_kept": 0,
+            "region_components_rejected": 0,
+            "region_rejected_pixels": 0,
+            "region_strong_kept": 0,
+            "region_weak_kept": 0,
+        }
+    region_model = load_region_model(params.region_model_path) if params.region_score_enable else None
+    rows = compute_region_stats(accept_mask, cand_disp, cand_conf, cand_cost, evidence_maps)
+    strong_mask = np.zeros_like(accept_mask, dtype=bool)
+    weak_mask = np.zeros_like(accept_mask, dtype=bool)
+    components_kept = 0
+    rejected_pixels = 0
+    strong_kept = 0
+    weak_kept = 0
+    for row in rows:
+        hard_ok = True
+        if params.region_min_pixels > 1 and row["area_px"] < params.region_min_pixels:
+            hard_ok = False
+        if params.region_min_fill_ratio > 0.0 and row["fill_ratio"] < params.region_min_fill_ratio:
+            hard_ok = False
+        if params.region_max_disp_std > 0.0 and row["disp_std"] > params.region_max_disp_std:
+            hard_ok = False
+        if not hard_ok:
+            rejected_pixels += int(row["area_px"])
+            continue
+        components_kept += 1
+        score = score_region_from_model(row, region_model)
+        region_mask = row["mask"]
+        if params.region_score_enable:
+            if score >= params.region_score_threshold_strong:
+                strong_mask |= region_mask
+                strong_kept += 1
+            elif score >= params.region_score_threshold_weak:
+                weak_mask |= (region_mask & accept_close)
+                weak_kept += 1
+            else:
+                rejected_pixels += int(row["area_px"])
+        else:
+            strong_mask |= region_mask
+            strong_kept += 1
+    filtered = strong_mask | weak_mask
+    return filtered, weak_mask, {
+        "region_components_total": len(rows),
+        "region_components_kept": components_kept,
+        "region_components_rejected": len(rows) - components_kept,
+        "region_rejected_pixels": rejected_pixels,
+        "region_strong_kept": strong_kept,
+        "region_weak_kept": weak_kept,
+    }
 
 
 def merge_disparity_state(
@@ -242,6 +387,8 @@ def merge_disparity_state(
     cand_severity: np.ndarray,
     roi_mask: np.ndarray,
     params: TemporalMergeParams,
+    cand_conf_override: Optional[np.ndarray] = None,
+    evidence_maps: Optional[dict[str, np.ndarray]] = None,
 ):
     """
     Merge candidate disparity into persistent state.
@@ -258,7 +405,10 @@ def merge_disparity_state(
     roi = roi_mask.astype(bool)
     cand_valid_mask = cand_valid.astype(bool)
     severity_ok = cand_severity <= params.max_severity_promote
-    cand_conf = confidence_from_cost_gap(cand_cost, cand_gap, params.max_cost)
+    if cand_conf_override is not None:
+        cand_conf = np.clip(cand_conf_override.astype(np.float32), 0.0, 1.0)
+    else:
+        cand_conf = confidence_from_cost_gap(cand_cost, cand_gap, params.max_cost)
 
     hard_ok = (
         roi
@@ -294,6 +444,18 @@ def merge_disparity_state(
     )
 
     accept = accept_close | accept_better | accept_temporal
+    accept, weak_region_mask, region_stats = _filter_region_acceptance(
+        accept,
+        accept_close,
+        cand_disp,
+        cand_conf,
+        cand_cost,
+        params,
+        evidence_maps=evidence_maps,
+    )
+    accept_close &= accept
+    accept_better &= accept
+    accept_temporal &= accept
 
     stability_next = np.where(
         accept & prev_exists & (delta <= params.tau_close_disp),
@@ -322,6 +484,7 @@ def merge_disparity_state(
         "accepted_temporal_pixels": int(np.count_nonzero(accept_temporal)),
         "expired_pixels": int(np.count_nonzero(expire)),
         "mean_candidate_conf": float(cand_conf[hard_ok].mean()) if np.any(hard_ok) else 0.0,
+        **region_stats,
     }
 
     return new_disp, new_conf, new_age, new_stability, new_valid, evidence, cand_conf, accept, stats

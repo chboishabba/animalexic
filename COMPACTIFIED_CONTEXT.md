@@ -3,8 +3,14 @@
 - Source chat: "Stereo 3D 4K60 Pipeline"
 - Online thread UUID: 69bce770-5540-8398-9257-b1c7da6a1d11
 - Canonical thread ID: df0976e7ec5aabd4809189993f76cf4be8331b0b
-- Source: local archive (`pull_to_structurer.py` → `chat_context_resolver.py`, 2026-03-25)
+- Source: local archive (`pull_to_structurer.py` → `chat_context_resolver.py`, refreshed from DB on 2026-03-26)
 - Chat window: 2026-03-20 06:22:06–06:40:15 UTC
+- Resolver result: exact title match, source `db`, decision reason `db_match_found`
+- Companion analysis chat: "ZKP Framing Analysis"
+- Online thread UUID: 69c498c6-9514-839b-bce3-583cb6c168e5
+- Canonical thread ID: e73a07606b58ec64b19007e3230e459e1283204e
+- Source: local archive (`pull_to_structurer.py` → `chat_context_resolver.py`, refreshed from DB on 2026-03-27)
+- Resolver result: exact online-thread-id match, source `db`, decision reason `db_match_found`
 
 ## Main points pulled from the thread
 
@@ -29,3 +35,144 @@
 - Current demo-mode limitation is accepted: uncalibrated runs provide relative disparity structure only, not metric depth.
 - End-user design assumption: self-calibration is required for practical usage; board-based ChArUco calibration remains an optional higher-quality path, not the only supported path.
 - Immediate next milestone is calibrated fixed-rig validation on local clips, not more YouTube/demo-profile iteration unless needed to debug regressions.
+- Runtime ROI is now explicit:
+  - default path is motion-gated delta ROI for compute savings
+  - `--full-frame-roi` forces full-frame stereo search for static or low-motion scenes
+  - ROI mode is a compute-scope choice; it does not replace geometry grounding
+- Source resolution can be probed automatically:
+  - `--auto-res` asks the runtime to discover the source's native decoded size and scale to that
+  - this is especially useful for higher-resolution YouTube SBS sources, where 360p test settings can under-feed the matcher
+  - it changes compute cost, not the need for calibration
+- Startup is now instrumented to avoid silent hangs:
+  - streamer init prints when YouTube resolution is being resolved, when ffprobe is probing, and when ffmpeg starts
+  - first-frame waits print periodic heartbeats while the runtime is waiting on input or usable brightness
+  - ffmpeg stderr is now owned by the scripts, so shutdown emits a concise local message instead of raw broken-pipe spam
+  - runtime/oracle both close or kill lingering ffmpeg children on exit and on Ctrl-C
+- Bootstrap self-calibration is opportunistic, not guaranteed:
+  - the runtime can seed a calibration artifact from the first stereo pair when enough features are present
+  - on low-texture or compressed SBS sources, it may fail and fall back to unrectified demo mode
+  - the YouTube SBS path is useful for sanity checks, but a real calibration artifact is still the stable path for coverage and metric depth
+- The next baseline milestone is an OpenCV SBS oracle:
+  - split SBS into left/right
+  - rectify with provided or bootstrapped geometry
+  - compute disparity and reprojection as a reference oracle
+  - keep that output in candidate space for comparison, not promoted truth
+- Oracle-vs-runtime comparison is now explicit:
+  - `scripts/compare_oracle_runtime.py` compares oracle summary coverage against runtime receipts
+  - when `valid_f*.png` and `promoted_mask_f*.png` are both available, it also computes mask IoU / overlap metrics
+  - it now accepts oracle receipts plus runtime sqlite or JSONL and emits joined per-frame metrics plus threshold-direction recommendations
+- Calibrated runtime tuning has started:
+  - calibrated runs now use looser CPU census thresholds than the generic uncalibrated defaults
+  - frame 0 logs the active `min_tex` / `max_cost` / `min_conf` so threshold drift is visible in receipts-adjacent logs
+  - calibrated runs also default to a wider CPU census disparity search (`disp_max=128`) to match the oracle's range more closely
+  - calibrated `matcher=auto` now selects `opencv_sgbm` as the candidate generator while preserving the same promote/abstain/receipt path
+- Governance/planning surface is now explicit in code:
+  - `scripts/merge_policy.py` defines online and oracle-conditioned promotion rules plus parameter-update heuristics
+  - `scripts/oracle_teacher.py` exports oracle-conditioned supervision from runtime/oracle artifact directories for later confidence/promotion learning
+- Oracle/runtime alignment is now source-aware instead of ordinal-only:
+  - `FrameStreamer` records ffmpeg-selected frame metadata (`source_selected_index`, partial `source_pts_time`) for both runtime and oracle paths
+  - `scripts/compare_oracle_runtime.py` now joins by source time first, then selected-frame index, then frame ordinal as a legacy fallback
+- The active optimization target has changed:
+  - the problem is no longer "increase coverage"
+  - the problem is now "increase spatial agreement with the oracle" (`IoU(C, O)`), because candidate and promoted coverage are no longer collapsing but overlap remains low
+  - candidate placement / agreement is the main bottleneck, not governance collapse
+- Decomposed SGBM evidence is now persisted:
+  - `candidate_cost`, `candidate_conf`, `candidate_lr_delta`, `candidate_median_delta`, `candidate_texture`, and `candidate_disp_gradient`
+  - these features are exported through `scripts/oracle_teacher.py` for candidate-vs-oracle supervision
+- Teacher/calibration path now avoids promotion leakage:
+  - `scripts/oracle_calibrate_confidence.py` no longer trains on `runtime_promoted`
+  - the intended training set is the balanced teacher export (oracle positives + hard negatives + background negatives), not candidate-only conditioning
+  - the learned confidence model remains opt-in because a drop-in learned gate still underperforms the heuristic decomposed-evidence baseline on aligned compare
+- Oracle/runtime comparison now emits disagreement heatmaps:
+  - `candidate_overlap_fNNNN.png` and `promoted_overlap_fNNNN.png`
+  - TP is green, FP is red, FN is blue
+  - these artifacts are the current debugging surface for candidate placement failures
+  - `scripts/analyze_overlap_heatmaps.py` now aggregates those heatmaps into tile-level hotspot summaries
+  - current best region-filtered run shows dominant FN mass in the center/right image bands and recurring FP islands near the lower/right borders
+- Region-level acceptance is now part of the calibrated SGBM merge path:
+  - connected accepted components are filtered by minimum size, bounding-box fill ratio, and local disparity standard deviation before canonical promotion
+  - first aligned run with this filter improved candidate IoU from ~0.015 to ~0.027 and promoted IoU from ~0.014 to ~0.024 on the house segment
+  - region thresholds are now tunable from the CLI; the first small sweep favored `region_min_pixels=40`, `region_max_disp_std=6.0`, `region_min_fill_ratio=0.12` as the best tested promoted-IoU tradeoff
+  - the remaining bottleneck is still candidate placement, not promotion collapse
+- Edge-distance and border-penalty evidence channels now exist in the SGBM runtime/teacher path, but the first border-aware matcher pass is not a win yet:
+  - candidate IoU rose slightly (~0.0269 -> ~0.0282)
+  - promoted IoU regressed materially (~0.0237 -> ~0.0179)
+  - current conclusion: border-aware evidence should likely bias cost/confidence, not directly gate candidate validity
+- Region-aware teacher/trainer plumbing now exists:
+  - `scripts/oracle_teacher.py` can export `oracle_teacher_regions.jsonl` with connected-component region stats and oracle overlap labels
+  - `scripts/region_calibrate.py` trains a first simple region stump model from that dataset
+  - `scripts/run_stereo_dispatch.py` and `scripts/fixed_rig_runtime.py` can now load an optional region model and apply strong/weak region scoring during merge
+- First region-model runtime test is not a win yet:
+  - runtime was evaluated with `--region-model outputs/runtime_npbi_edge24c/region_model.json`
+  - aligned compare regressed against the best plain region-filter baseline
+  - region-model run metrics on the house segment:
+    - candidate IoU ~0.022
+    - promoted IoU ~0.020
+    - candidate pct ~2.44%
+    - promoted pct ~2.19%
+  - baseline region-filter run remains better:
+    - candidate IoU ~0.0269
+    - promoted IoU ~0.0237
+    - candidate pct ~3.50%
+    - promoted pct ~3.31%
+  - current conclusion: the first learned/thresholded region score is too blunt and should not replace the tuned hard region filter yet
+- Current aligned baseline on the house segment:
+  - heuristic decomposed evidence path is the best current runtime path
+  - a learned confidence model is available as an explicit opt-in only; it is not the default because the first learned gate regressed aligned compare metrics
+  - current work should optimize placement / overlap and region structure, not simply scalar confidence thresholds
+- Cheap morphological candidate expansion has now been tested ahead of region filtering:
+  - one-step `3x3` dilation constrained by ROI + texture + LR/median support was added to the calibrated SGBM path
+  - it improved overlap relative to the earlier edge-aware and region-model runs and roughly matched/slightly exceeded the best tuned hard region-filter baseline
+  - first threshold sweep (`outputs/expansion_sweep_results.json`) showed the default support thresholds remained the best tested promoted-IoU tradeoff:
+    - baseline `texture>=24`, `lr_delta<=48`, `median_delta<=32` -> promoted IoU ~0.0247
+    - looser thresholds raised coverage materially but reduced IoU
+    - tighter LR/median thresholds generally hurt promoted IoU
+  - a follow-up hotspot-targeted interior horizontal expansion pass was also tested and regressed:
+    - `outputs/oracle_runtime_compare_expand24_hotband/comparison_summary.json`
+    - candidate IoU ~0.023
+    - promoted IoU ~0.022
+    - FN hotspot bands in the center/right interior remained dominant
+  - current practical direction: keep expansion cheap and constrained, and treat the existing defaults as the best tested expansion settings until a hotspot-targeted follow-up shows a better IoU tradeoff
+- Guarded downstream voxel projection now exists as a prototype:
+  - `scripts/voxel_guard.py` now implements the exact guarded accumulation shape:
+    - `e_t(v)=sum_{p in R_t(v)} w_t(p,v)`
+    - `w_t(p,v)=c_t(p) * g_t(p) * o_t(p) * r_t(p,v)`
+    - `E_t(v)=alpha E_{t-1}(v)+e_t(v)`
+    - `H_t(v)=alpha_H H_{t-1}(v)+1[e_t(v)>0]`
+    - `S_t(v)=E_t(v)*(1+beta*min(H_t(v),H_max))`
+    - guarded states: `grounded`, `plateau`, `ascended`, with an extra residual gate `rho_t(v) <= epsilon_rho`
+  - `scripts/promoted_depth_to_voxel.py` consumes lossless promoted-depth NPZ artifacts (`promoted_depth_f*.npz`) when available and projects them into the guarded voxel field
+  - the runtime now also writes lossless promoted-depth artifacts (`promoted_depth_f*.npz`) containing:
+    - `canonical_disp_q8`
+    - `promoted_mask`
+    - `depth`
+  - `scripts/promoted_depth_to_voxel.py` now prefers those NPZ artifacts over the older PNG approximation path and uses the exact normalized ray-weight accumulation
+  - first validated run on `outputs/runtime_npbi_expand24` produced:
+    - `outputs/voxel_expand24/voxel_state.npz`
+    - `outputs/voxel_expand24/voxel_summary.json`
+    - `outputs/voxel_expand24/voxels_ascended.ply`
+  - initial PNG-backed prototype counts on that run:
+    - plateau voxels: 137
+    - ascended voxels: 195
+  - first NPZ-backed lossless run on `outputs/runtime_npbi_expand24_lossless` produced:
+    - `outputs/voxel_expand24_lossless/voxel_state.npz`
+    - `outputs/voxel_expand24_lossless/voxel_summary.json`
+    - `outputs/voxel_expand24_lossless/voxels_ascended.ply`
+  - current NPZ-backed counts:
+    - plateau voxels: 35
+    - ascended voxels: 47
+  - exact-equation 24-frame lossless run on `outputs/runtime_npbi_expand24_lossless` at `stride=16` produced:
+    - `outputs/voxel_expand24_exact24/voxel_state.npz`
+    - `outputs/voxel_expand24_exact24/voxel_summary.json`
+    - `outputs/voxel_expand24_exact24/voxels_ascended.ply`
+    - plateau voxels: 23
+    - ascended voxels: 26
+  - this establishes the intended downstream seam:
+    - `PromotedDepth -> CandidateVoxelHits -> VoxelGuard -> Promote/Abstain`
+- Repo-state recovery on 2026-03-26:
+  - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
+  - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
+- Edge-aware teacher/calibration export is wired through now, but the first retrained logistic model is still degenerate:
+  - best threshold stays at `0.10` with effectively all-positive predictions
+  - candidate baseline precision improved on the edge-aware runtime, but learned scoring still does not produce a usable promotion surface
+  - next learning pass likely needs region-aware targets or a different supervision split, not just more scalar pixel features

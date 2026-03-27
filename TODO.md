@@ -3,14 +3,33 @@
 - Stand up Retinify locally and confirm it runs on the available GPU; note VRAM headroom.
 - Capture or source two evaluation sets: (a) fixed rig dog clip; (b) dual-phone dog clip with drifting viewpoints.
 - Generate a calibration artifact and validate rectification on a local stereo clip. Prefer self-calibration for end-user flow; keep ChArUco as an optional higher-quality path.
+- Document and keep exercising the explicit ROI modes: default motion-gated scheduling versus `--full-frame-roi` for static scenes.
+- Add a clearer bootstrap failure heuristic for self-calibration so low-match YouTube SBS sources skip straight to demo mode without user confusion.
 - Prototype Regime A loop per `plan.md`: calibration/rectification → disparity with delta gating → instrumentation (FPS/latency/pixel coverage). (temporal merge/promotion/accumulation added; demo/relative 3D milestone reached; next confirm calibrated local stability)
 - Instrumented profiling: log per-stage timings and delta-mask coverage at 4K.
 - Validate the new calibration artifact schema (`fixed_rig_calibration_v1`) and prefer `--merge-profile calibrated` for local artifact-backed runs.
 - Validate the self-calibration artifact flow (`fixed_rig_selfcal_v1`) on a local stereo pair or SBS frame and measure how well rectification improves coverage.
+- Use `scripts/compare_oracle_runtime.py` on the calibrated house segment and drive runtime tuning from the generated gap summary instead of ad hoc log reading.
+- Integrate `scripts/merge_policy.py` with the governed runtime so calibrated/teacher-mode promotion can be configured as policy objects rather than hard-coded threshold bundles.
+- Keep `scripts/oracle_teacher.py` focused on source-aligned oracle/runtime runs and use it to export rich evidence channels (`cost`, `conf`, `lr_delta`, `median_delta`, `texture`, `disp_gradient`) for overlap tuning.
+- Improve candidate placement / agreement with the oracle rather than raw coverage; track `IoU`, `FN`, and `FP` as the primary compare metrics.
+- Use the new disagreement heatmaps (`candidate_overlap_fNNNN.png`, `promoted_overlap_fNNNN.png`) to identify recurrent FN/FP structures before changing matcher or merge rules.
+- Use `scripts/analyze_overlap_heatmaps.py` on aligned compare dirs and target the recurrent hotspot bands: central/right false negatives and lower/right border false positives in the current house segment.
+- Rework the new border-aware SGBM evidence pass: first attempt raised candidate IoU slightly but regressed promoted IoU badly, so the border penalty / interior bonus needs a softer integration than direct candidate validity filtering.
+- Keep tuning region-level acceptance (`region_min_pixels`, `region_max_disp_std`, `region_min_fill_ratio`) against the disagreement heatmaps; first sweep favored `region_min_pixels=40`, but the gains are still modest and candidate placement remains the main bottleneck.
+- Rework the first region-model merge path. `scripts/oracle_teacher.py` and `scripts/region_calibrate.py` now export/train region labels, but the first stump-scored runtime (`outputs/oracle_runtime_compare_region_model24`) regressed versus the tuned hard region-filter baseline.
+- Make region-model training robust to older runtime dirs that do not contain edge-distance / border-penalty artifacts; region teacher export currently only succeeds on newer runtime outputs with the full evidence set.
+- Try a better region scorer than the current single-threshold stump (small tree ensemble or score on multiple region features) before replacing the tuned hard region filter in the calibrated default path.
+- Tune the new cheap morphological candidate expansion against the aligned FN hotspots. The first sweep (`outputs/expansion_sweep_results.json`) favored the current default support thresholds (`texture>=24`, `lr_delta<=48`, `median_delta<=32`) as the best tested promoted-IoU tradeoff; next sweep should target hotspot-specific recovery, not just global loosening/tightening.
+- Do not keep the current hotspot-targeted horizontal expansion variant. The first interior-band expansion pass regressed IoU (`outputs/oracle_runtime_compare_expand24_hotband`), so any further hotspot recovery should be driven by a different support rule, not wider horizontal growth alone.
+- Rework the learned confidence path beyond the current balanced logistic baseline so it improves overlap over the heuristic decomposed-evidence path; candidate-only learned gating is not sufficient.
+- Lossless promoted-depth export is now wired (`promoted_depth_f*.npz`), but downstream geometry still needs to standardize on it everywhere and retire the PNG fallback once older artifact dirs are no longer needed.
+- Extend `scripts/promoted_depth_to_voxel.py` from a prototype into a real downstream operator: the exact guarded accumulation equations are now wired in, so the next step is to tune weighting/termination and decide whether surfels/splats should replace or complement voxel occupancy.
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.
 - Tune evidence accumulation parameters (min_evidence_frames, weak_conf_scale, decay) for relative 3D stability.
 - Draft failure-handling heuristics for Regime B (low overlap, desync, rolling shutter) and choose refresh policy for extrinsics drift.
-- Decide when to add `CHANGELOG.md` (once first code lands) and keep notes ready.
+- Keep `CHANGELOG.md` updated when runtime behavior changes so ROI/calibration decisions stay auditable.
 - Wire Vulkan path via ../dashiCORE: ingest (nv12_to_r8/rgba) → motion mask → warp/rectify (warp_affine_2d) → disparity kernel (to be authored) → write_image preview.
 - Add a minimal stereo disparity compute shader (block or census) compatible with the existing Vulkan dispatcher layouts.
 - Author SPIR-V kernels per `docs/kernel_specs.md`: frame_diff (motion mask), stereo_roi (census WTA), splat_render (atomic depth/min compositing); reuse existing warp/reduce kernels.
+- Fix the learned edge-aware calibrator objective/data split: the richer feature set still collapses to an all-positive threshold, so the next pass needs a better target or region-aware supervision rather than more raw scalar features.

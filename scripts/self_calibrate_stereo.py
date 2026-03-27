@@ -5,8 +5,125 @@ import json
 import time
 import uuid
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
+
+
+def _calibration_metadata(
+    *,
+    rig_id: str,
+    width: int,
+    height: int,
+    left_image: str | None,
+    right_image: str | None,
+    sbs_image: str | None,
+    method: str,
+    quality: Dict[str, int | float],
+    calibration_id: str,
+) -> Dict[str, object]:
+    return {
+        "schema_version": "fixed_rig_selfcal_v1",
+        "calibration_id": calibration_id,
+        "rig_id": rig_id,
+        "image_width": width,
+        "image_height": height,
+        "image_size": {"width": width, "height": height},
+        "method": method,
+        "quality": quality,
+        "provenance": {
+            "left_image": left_image,
+            "right_image": right_image,
+            "sbs_image": sbs_image,
+            "created_at_unix": time.time(),
+        },
+    }
+
+
+def estimate_self_calibration_from_arrays(
+    left: np.ndarray,
+    right: np.ndarray,
+    rig_id: str = "rig_selfcal",
+    max_features: int = 4000,
+    left_image: str | None = None,
+    right_image: str | None = None,
+    sbs_image: str | None = None,
+):
+    import cv2
+
+    if left.shape != right.shape:
+        raise RuntimeError(f"left/right sizes differ: {left.shape} vs {right.shape}")
+
+    height, width = left.shape
+    orb = cv2.ORB_create(nfeatures=max_features)
+    kp_l, des_l = orb.detectAndCompute(left, None)
+    kp_r, des_r = orb.detectAndCompute(right, None)
+    if des_l is None or des_r is None:
+        raise RuntimeError("ORB failed to find enough features")
+
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+    knn = matcher.knnMatch(des_l, des_r, k=2)
+    good = []
+    for pair in knn:
+        if len(pair) != 2:
+            continue
+        m, n = pair
+        if m.distance < 0.75 * n.distance:
+            good.append(m)
+    if len(good) < 16:
+        raise RuntimeError(f"not enough feature matches for self-calibration: {len(good)}")
+
+    pts_l = np.float32([kp_l[m.queryIdx].pt for m in good])
+    pts_r = np.float32([kp_r[m.trainIdx].pt for m in good])
+    F, mask = cv2.findFundamentalMat(pts_l, pts_r, cv2.FM_RANSAC, 1.0, 0.99)
+    if F is None or mask is None:
+        raise RuntimeError("failed to estimate fundamental matrix")
+
+    inliers = mask.ravel().astype(bool)
+    pts_l_in = pts_l[inliers]
+    pts_r_in = pts_r[inliers]
+    if len(pts_l_in) < 12:
+        raise RuntimeError(f"not enough inliers after RANSAC: {len(pts_l_in)}")
+
+    ok, H1, H2 = cv2.stereoRectifyUncalibrated(pts_l_in, pts_r_in, F, imgSize=(width, height))
+    if not ok:
+        raise RuntimeError("stereoRectifyUncalibrated failed")
+
+    left_map_x, left_map_y = _homography_to_maps(H1, width, height)
+    right_map_x, right_map_y = _homography_to_maps(H2, width, height)
+    q_matrix = _pseudo_q(width, height)
+
+    quality = {
+        "feature_count_left": len(kp_l),
+        "feature_count_right": len(kp_r),
+        "match_count": len(good),
+        "inlier_count": int(inliers.sum()),
+        "inlier_ratio": float(inliers.mean()),
+    }
+    calibration_id = str(uuid.uuid4())
+    metadata = _calibration_metadata(
+        rig_id=rig_id,
+        width=width,
+        height=height,
+        left_image=left_image,
+        right_image=right_image,
+        sbs_image=sbs_image,
+        method="orb_fundamental_uncalibrated_rectification",
+        quality=quality,
+        calibration_id=calibration_id,
+    )
+
+    return {
+        "left_map_x": left_map_x,
+        "left_map_y": left_map_y,
+        "right_map_x": right_map_x,
+        "right_map_y": right_map_y,
+        "H1": H1,
+        "H2": H2,
+        "F": F,
+        "Q": q_matrix,
+        "metadata": metadata,
+    }
 
 
 def _load_pair(left_path: Path | None, right_path: Path | None, sbs_path: Path | None):
@@ -77,85 +194,30 @@ def main():
         Path(args.right_image) if args.right_image else None,
         Path(args.sbs_image) if args.sbs_image else None,
     )
-    if left.shape != right.shape:
-        raise RuntimeError(f"left/right sizes differ: {left.shape} vs {right.shape}")
-
-    height, width = left.shape
-    orb = cv2.ORB_create(nfeatures=args.max_features)
-    kp_l, des_l = orb.detectAndCompute(left, None)
-    kp_r, des_r = orb.detectAndCompute(right, None)
-    if des_l is None or des_r is None:
-        raise RuntimeError("ORB failed to find enough features")
-
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
-    knn = matcher.knnMatch(des_l, des_r, k=2)
-    good = []
-    for pair in knn:
-        if len(pair) != 2:
-            continue
-        m, n = pair
-        if m.distance < 0.75 * n.distance:
-            good.append(m)
-    if len(good) < 16:
-        raise RuntimeError(f"not enough feature matches for self-calibration: {len(good)}")
-
-    pts_l = np.float32([kp_l[m.queryIdx].pt for m in good])
-    pts_r = np.float32([kp_r[m.trainIdx].pt for m in good])
-    F, mask = cv2.findFundamentalMat(pts_l, pts_r, cv2.FM_RANSAC, 1.0, 0.99)
-    if F is None or mask is None:
-        raise RuntimeError("failed to estimate fundamental matrix")
-    inliers = mask.ravel().astype(bool)
-    pts_l_in = pts_l[inliers]
-    pts_r_in = pts_r[inliers]
-    if len(pts_l_in) < 12:
-        raise RuntimeError(f"not enough inliers after RANSAC: {len(pts_l_in)}")
-
-    ok, H1, H2 = cv2.stereoRectifyUncalibrated(pts_l_in, pts_r_in, F, imgSize=(width, height))
-    if not ok:
-        raise RuntimeError("stereoRectifyUncalibrated failed")
-
-    left_map_x, left_map_y = _homography_to_maps(H1, width, height)
-    right_map_x, right_map_y = _homography_to_maps(H2, width, height)
-    q_matrix = _pseudo_q(width, height)
+    cal = estimate_self_calibration_from_arrays(
+        left,
+        right,
+        rig_id=args.rig_id,
+        max_features=args.max_features,
+        left_image=args.left_image,
+        right_image=args.right_image,
+        sbs_image=args.sbs_image,
+    )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    calibration_id = str(uuid.uuid4())
     np.savez_compressed(
         output_path,
-        left_map_x=left_map_x,
-        left_map_y=left_map_y,
-        right_map_x=right_map_x,
-        right_map_y=right_map_y,
-        H1=H1,
-        H2=H2,
-        F=F,
-        Q=q_matrix,
+        left_map_x=cal["left_map_x"],
+        left_map_y=cal["left_map_y"],
+        right_map_x=cal["right_map_x"],
+        right_map_y=cal["right_map_y"],
+        H1=cal["H1"],
+        H2=cal["H2"],
+        F=cal["F"],
+        Q=cal["Q"],
     )
-
-    metadata = {
-        "schema_version": "fixed_rig_selfcal_v1",
-        "calibration_id": calibration_id,
-        "rig_id": args.rig_id,
-        "image_width": width,
-        "image_height": height,
-        "image_size": {"width": width, "height": height},
-        "method": "orb_fundamental_uncalibrated_rectification",
-        "quality": {
-            "feature_count_left": len(kp_l),
-            "feature_count_right": len(kp_r),
-            "match_count": len(good),
-            "inlier_count": int(inliers.sum()),
-            "inlier_ratio": float(inliers.mean()),
-        },
-        "provenance": {
-            "left_image": args.left_image,
-            "right_image": args.right_image,
-            "sbs_image": args.sbs_image,
-            "created_at_unix": time.time(),
-        },
-    }
-    output_path.with_suffix(".json").write_text(json.dumps(metadata, indent=2, sort_keys=True))
+    output_path.with_suffix(".json").write_text(json.dumps(cal["metadata"], indent=2, sort_keys=True))
 
     if args.save_debug_dir:
         debug_dir = Path(args.save_debug_dir)

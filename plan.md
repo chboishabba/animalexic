@@ -40,9 +40,9 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 - Define scoring: FPS/latency (A), qualitative fusion/temporal stability (B), optional disparity error if ground truth exists.
 
 ## M0 — Stereo matcher decision (now)
-- Candidate: **Retinify** (GPU-accelerated stereo pipeline; architecturally aligned with 4K60).
-- Action: proceed with Retinify as first implementation; keep one fallback lightweight classical matcher ready if Retinify underperforms on our GPU.
-- Open item: confirm exact GPU model + available VRAM to tune parameters.
+- Oracle baseline: **OpenCV stereo** for calibration/rectification/disparity/reprojection sanity checks.
+- Action: implement the OpenCV SBS oracle first; keep Retinify as a later benchmark/comparison candidate rather than the system-of-record.
+- Open item: confirm exact GPU model + available VRAM to tune parameters for the eventual Vulkan/Retinify comparison path.
 
 ## Implementation outline (Regime A)
 - Calibrate + rectify once; persist intrinsics/extrinsics.
@@ -59,10 +59,14 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 - Thermal throttling: monitor clocks; keep a lower-power profile for long runs.
 
 ## Immediate actions (next 3 working sessions)
+- Use the calibrated oracle as a teacher on source-aligned runs and optimize for overlap / agreement (`IoU`, false negatives, false positives), not coverage alone.
+- Improve candidate placement with richer evidence and region-level reasoning before attempting another learned promotion gate.
+- Keep learned confidence calibration opt-in until it beats the heuristic decomposed-evidence baseline on aligned compare metrics.
+- Use disagreement heatmaps (`candidate_overlap_fNNNN.png`, `promoted_overlap_fNNNN.png`) as the primary debugging surface for FN/FP structure before changing runtime policy.
 - Generate a calibration artifact and validate rectified/canonical depth on a local stereo clip; self-calibration is the default end-user path, with board calibration as an optional higher-quality route.
 - Capture or download two short clips for evaluation sets (fixed rig + dual-phone).
 - Add lightweight instrumentation wrapper to log FPS/latency/pixel coverage per stage.
-- Stand up Retinify locally and run a 4K test clip (even synthetic) to get baseline FPS once calibrated/local validation is stable.
+- Stand up Retinify locally and run a 4K test clip (even synthetic) to get baseline FPS once the OpenCV oracle and calibrated local validation are stable.
 - Runtime profiles are now explicit: `demo`, `demo_loose`, `calibrated`, `strict`; use `calibrated` for artifact-backed local validation and keep demo profiles for synthetic sanity only.
 - Calibration artifact sources now include both board-based calibration and self-calibration from matched stereo imagery.
 
