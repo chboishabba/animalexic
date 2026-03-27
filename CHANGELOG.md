@@ -87,3 +87,5 @@
   - tightening `pos_eps` from `0.30 -> 0.15` improved the regime monotonically on the fixed segment
   - `pos_eps=0.15` is the new preferred point: `165` ascended surfels with centroid residual `0.0140` versus `0.0236` for the non-promoted multi-frame set
   - wider merge radii increased the size and error of the non-promoted multi-frame set faster than they improved the promoted set, so the next surfel surface is another geometry-aware merge constraint rather than a broader spatial radius
+- Added `scripts/render_surfel_webm.py` to generate a viewable rotating `.webm` from a saved `surfels_state.npz` using OpenCV frame rendering plus `ffmpeg`.
+- Rendered the current best surfel baseline to `outputs/surfel_poseps_015_baseline/surfel_cloud.webm` so the densified spatial state can be inspected without a separate point-cloud viewer.

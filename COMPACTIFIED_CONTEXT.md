@@ -260,6 +260,9 @@
       - `gamma_neighbor=1.50`
       - `pos_eps=0.15`
     - the next surfel surface is now another merge-geometry refinement, most likely a depth-consistency gate
+    - a viewable export path now exists:
+      - `scripts/render_surfel_webm.py` renders a rotating `.webm` directly from `surfels_state.npz`
+      - current artifact for the preferred baseline: `outputs/surfel_poseps_015_baseline/surfel_cloud.webm`
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
