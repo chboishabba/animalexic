@@ -222,6 +222,23 @@
       - ascended centroid mean residual `0.0024`
       - non-promoted multi-frame centroid mean residual `0.0233`
     - this means the cross-frame surfel baseline has passed its correctness gate; the next surfel bottleneck is controlled densification, not merge semantics
+    - first controlled densification sweep on the same cross-frame semantics relaxed only `tau_a`
+    - key points:
+      - `tau_a=0.12`: `19` ascended, centroid residual `0.0049` vs `0.0237`
+      - `tau_a=0.06`: `32` ascended, centroid residual `0.0083` vs `0.0241`
+      - `tau_a=0.02`: `71` ascended, centroid residual `0.0119` vs `0.0252`
+      - `tau_a=0.00`: `215` ascended, centroid residual `0.0173` vs `0.0294`
+    - the preferred densified baseline is now around `tau_a=0.02`: materially denser than the cross-frame seed while still keeping a clear quality margin over the non-promoted multi-frame set
+    - second controlled densification sweep then increased only `beta` from that `tau_a=0.02` baseline
+    - key points:
+      - `beta=0.25`: `59` ascended, centroid residual `0.0109` vs `0.0249`
+      - `beta=0.60`: `85` ascended, centroid residual `0.0122` vs `0.0257`
+      - `beta=1.00`: `103` ascended, centroid residual `0.0124` vs `0.0265`
+    - the current preferred operating point is therefore:
+      - cross-frame-only merge semantics
+      - `tau_a=0.02`
+      - `beta=1.00`
+    - the next surfel surface is now a third knob (`gamma_neighbor` or a merge-support radius refinement), not more `tau_a`/`beta` digging
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

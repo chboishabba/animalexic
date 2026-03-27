@@ -71,3 +71,11 @@
   - plateau is now split into singleton and multi-frame subsets
   - the main comparison is `ascended` versus `nonpromoted_multiframe` rather than the raw plateau bucket
   - on `outputs/surfel_expand24_crossframe_v1`, ascended centroid residual (`0.0024`) beats the non-promoted multi-frame set (`0.0233`), so controlled densification is now justified from the cross-frame baseline
+- Ran the first one-knob densification sweep on the verified cross-frame baseline by relaxing `tau_a` only:
+  - `tau_a=0.18 -> 0.02` steadily increased ascended surfels from `10` to `71` while keeping ascended centroid residual better than the non-promoted multi-frame set throughout
+  - `tau_a=0.02` is the new conservative densified operating point (`71` ascended, `0.0119` centroid residual vs `0.0252` non-promoted multi-frame)
+  - `tau_a=0.00` still passes the comparison gate (`215` ascended, `0.0173` vs `0.0294`) but gives up quality headroom, so it is not the preferred baseline for the next sweep
+- Ran the second one-knob densification sweep on the `tau_a=0.02` baseline by increasing `beta` only:
+  - `beta=0.25 -> 1.00` increased ascended surfels from `59` to `103`
+  - centroid residual remained stable across the sweep (`0.0109 -> 0.0124`) and stayed well below the non-promoted multi-frame set (`0.0249 -> 0.0265`)
+  - the current preferred surfel operating point is `tau_a=0.02`, `beta=1.00` on the cross-frame merge semantics
