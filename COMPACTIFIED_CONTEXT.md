@@ -194,6 +194,13 @@
     - `scripts/surfel_guard.py` (surfel accumulation + guard)
     - `scripts/promoted_depth_to_surfel.py` consumes promoted-depth NPZ artifacts and emits surfel states/PLY
     - guards mirror the voxel path (mean evidence, residual weighting, beta/gamma neighbor term)
+  - surfel verification is now in place:
+    - `scripts/surfel_quality.py` measures nearest-promoted-cloud residuals for ascended, plateau, and grounded surfels
+    - first validation on `outputs/surfel_expand24_beta035_gamma020_v2` found:
+      - ascended mean residual `0.0238`
+      - plateau mean residual `0.0010`
+      - grounded sample mean residual `0.0049`
+    - this means surfel ascended state is not yet ordering quality correctly; the next surfel work is guard/support correction, not densification
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

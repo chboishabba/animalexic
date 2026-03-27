@@ -65,7 +65,7 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 - If the ascended set is coherent, tune only one guard knob at a time:
   - first try increasing temporal persistence (`h_a`)
   - if needed, then lower `tau_a` slightly
-- Keep the guarded voxel seam conservative until the quality check passes; do not add surfel/splat output before the voxel verifier shows the promoted 3D state is trustworthy.
+- Keep the guarded downstream seam conservative until the quality checks pass. Surfel output is now available, but the first surfel verifier run shows ascended surfels are worse than plateau on promoted-cloud residuals, so surfel work should focus on guard/support correctness before any densification.
 - Use the calibrated oracle as a teacher on source-aligned runs and optimize for overlap / agreement (`IoU`, false negatives, false positives), not coverage alone.
 - Improve candidate placement with richer evidence and region-level reasoning before attempting another learned promotion gate.
 - Keep learned confidence calibration opt-in until it beats the heuristic decomposed-evidence baseline on aligned compare metrics.

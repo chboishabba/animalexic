@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from fixed_rig_runtime import load_calibration_artifact
+from surfel_guard import SURFEL_ASCENDED, SURFEL_GROUNDED, SURFEL_PLATEAU, write_colored_ply_ascii, write_points_ply_ascii
+
+
+def _load_mask(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
+    arr = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return None
+    return (arr > 0).astype(np.uint8)
+
+
+def _load_gray(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
+    arr = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return None
+    return arr
+
+
+def _load_promoted_npz(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    if not path.exists():
+        return None
+    blob = np.load(path)
+    return (
+        blob["canonical_disp_q8"].astype(np.uint16),
+        blob["promoted_mask"].astype(np.uint8),
+        blob["depth"].astype(np.float32),
+    )
+
+
+def _frame_indices(runtime_dir: Path) -> list[int]:
+    out = []
+    for path in runtime_dir.glob("promoted_mask_f*.png"):
+        stem = path.stem
+        try:
+            out.append(int(stem.split("_f", 1)[1]))
+        except Exception:
+            continue
+    return sorted(set(out))
+
+
+def _reproject_points_from_disp(
+    disp_map: np.ndarray,
+    promoted_mask: np.ndarray,
+    q_matrix: np.ndarray,
+    *,
+    stride: int,
+    max_depth: float,
+    min_disp: float,
+) -> np.ndarray:
+    ys, xs = np.nonzero(promoted_mask)
+    if ys.size == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    ys = ys[:: max(1, stride)]
+    xs = xs[:: max(1, stride)]
+
+    disp = disp_map[ys, xs].astype(np.float32)
+    valid_disp = disp >= float(min_disp)
+    if not np.any(valid_disp):
+        return np.zeros((0, 3), dtype=np.float32)
+
+    ys = ys[valid_disp]
+    xs = xs[valid_disp]
+    disp = disp[valid_disp]
+
+    q = q_matrix.astype(np.float32)
+    vec = np.stack(
+        [
+            xs.astype(np.float32),
+            ys.astype(np.float32),
+            disp,
+            np.ones_like(disp, dtype=np.float32),
+        ],
+        axis=0,
+    )
+    homog = q @ vec
+    w = homog[3]
+    good = np.abs(w) > 1e-6
+    if not np.any(good):
+        return np.zeros((0, 3), dtype=np.float32)
+
+    xyz = (homog[:3, good] / w[good]).T.astype(np.float32)
+    finite = np.isfinite(xyz).all(axis=1)
+    xyz = xyz[finite]
+    if xyz.size == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    if np.mean(xyz[:, 2]) < 0.0:
+        xyz[:, 2] *= -1.0
+    depth_ok = xyz[:, 2] > 0.0
+    if max_depth > 0:
+        depth_ok &= xyz[:, 2] <= float(max_depth)
+    return xyz[depth_ok].astype(np.float32)
+
+
+def _nearest_neighbor_distances(query: np.ndarray, reference: np.ndarray, *, batch: int = 1024) -> np.ndarray:
+    if query.size == 0:
+        return np.zeros((0,), dtype=np.float32)
+    if reference.size == 0:
+        return np.full((len(query),), np.inf, dtype=np.float32)
+    dists = np.empty((len(query),), dtype=np.float32)
+    ref = reference.astype(np.float32)
+    for start in range(0, len(query), batch):
+        end = min(start + batch, len(query))
+        chunk = query[start:end].astype(np.float32)
+        diff = chunk[:, None, :] - ref[None, :, :]
+        sq = np.sum(diff * diff, axis=2)
+        dists[start:end] = np.sqrt(np.min(sq, axis=1))
+    return dists
+
+
+def _stats(distances: np.ndarray) -> dict:
+    if distances.size == 0:
+        return {
+            "count": 0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p90": 0.0,
+            "max": 0.0,
+        }
+    finite = distances[np.isfinite(distances)]
+    if finite.size == 0:
+        return {
+            "count": int(distances.size),
+            "mean": float("inf"),
+            "median": float("inf"),
+            "p90": float("inf"),
+            "max": float("inf"),
+        }
+    return {
+        "count": int(finite.size),
+        "mean": float(np.mean(finite)),
+        "median": float(np.median(finite)),
+        "p90": float(np.percentile(finite, 90)),
+        "max": float(np.max(finite)),
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--runtime-dir", type=Path, required=True)
+    ap.add_argument("--surfel-dir", type=Path, required=True)
+    ap.add_argument("--calibration", type=Path, required=True)
+    ap.add_argument("--output-dir", type=Path, required=True)
+    ap.add_argument("--frame-limit", type=int, default=0)
+    ap.add_argument("--stride", type=int, default=8)
+    ap.add_argument("--max-depth", type=float, default=0.0)
+    ap.add_argument("--min-disp", type=float, default=1.0)
+    ap.add_argument("--grounded-sample", type=int, default=5000)
+    args = ap.parse_args()
+
+    artifact = load_calibration_artifact(args.calibration)
+    surfel_state_path = args.surfel_dir / "surfels_state.npz"
+    if not surfel_state_path.exists():
+        raise SystemExit(f"missing surfel state: {surfel_state_path}")
+
+    surfel_blob = np.load(surfel_state_path)
+    states = surfel_blob["states"].astype(np.uint8)
+    pos = surfel_blob["pos"].astype(np.float32)
+
+    ascended = pos[states == SURFEL_ASCENDED]
+    plateau = pos[states == SURFEL_PLATEAU]
+    grounded = pos[states == SURFEL_GROUNDED]
+
+    frame_indices = _frame_indices(args.runtime_dir)
+    if args.frame_limit > 0:
+        frame_indices = frame_indices[: args.frame_limit]
+
+    promoted_points = []
+    for frame_idx in frame_indices:
+        promoted_pack = _load_promoted_npz(args.runtime_dir / f"promoted_depth_f{frame_idx:04d}.npz")
+        promoted_mask = None
+        disp_map = None
+        if promoted_pack is not None:
+            canonical_disp_q8, promoted_mask, _depth = promoted_pack
+            disp_map = canonical_disp_q8.astype(np.float32) / 256.0
+        else:
+            promoted_mask = _load_mask(args.runtime_dir / f"promoted_mask_f{frame_idx:04d}.png")
+            disp_map = _load_gray(args.runtime_dir / f"canonical_disp_f{frame_idx:04d}.png")
+        if promoted_mask is None or disp_map is None:
+            continue
+        pts = _reproject_points_from_disp(
+            disp_map,
+            promoted_mask,
+            artifact.q_matrix,
+            stride=max(1, args.stride),
+            max_depth=float(args.max_depth),
+            min_disp=float(args.min_disp),
+        )
+        if pts.size:
+            promoted_points.append(pts)
+
+    promoted_cloud = np.concatenate(promoted_points, axis=0) if promoted_points else np.zeros((0, 3), dtype=np.float32)
+
+    grounded_eval = grounded
+    if grounded_eval.size > 0 and len(grounded_eval) > int(args.grounded_sample):
+        rng = np.random.default_rng(0)
+        idx = rng.choice(len(grounded_eval), size=int(args.grounded_sample), replace=False)
+        grounded_eval = grounded_eval[idx]
+
+    ascended_dist = _nearest_neighbor_distances(ascended, promoted_cloud)
+    plateau_dist = _nearest_neighbor_distances(plateau, promoted_cloud)
+    grounded_dist = _nearest_neighbor_distances(grounded_eval, promoted_cloud)
+
+    asc_stats = _stats(ascended_dist)
+    plateau_stats = _stats(plateau_dist)
+    grounded_stats = _stats(grounded_dist)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_points_ply_ascii(args.output_dir / "promoted_points.ply", promoted_cloud)
+    write_points_ply_ascii(args.output_dir / "ascended_surfels.ply", ascended)
+    write_points_ply_ascii(args.output_dir / "plateau_surfels.ply", plateau)
+
+    overlay_points = []
+    overlay_colors = []
+    if promoted_cloud.size:
+        overlay_points.append(promoted_cloud)
+        overlay_colors.append(np.tile(np.array([[80, 80, 255]], dtype=np.uint8), (len(promoted_cloud), 1)))
+    if plateau.size:
+        overlay_points.append(plateau)
+        overlay_colors.append(np.tile(np.array([[255, 180, 60]], dtype=np.uint8), (len(plateau), 1)))
+    if ascended.size:
+        overlay_points.append(ascended)
+        overlay_colors.append(np.tile(np.array([[60, 220, 80]], dtype=np.uint8), (len(ascended), 1)))
+    if overlay_points:
+        overlay_pts = np.concatenate(overlay_points, axis=0)
+        overlay_cols = np.concatenate(overlay_colors, axis=0)
+        write_colored_ply_ascii(args.output_dir / "surfel_overlay.ply", overlay_pts, overlay_cols)
+
+    asc_better = asc_stats["mean"] < plateau_stats["mean"] or not np.isfinite(plateau_stats["mean"])
+    summary = {
+        "runtime_dir": str(args.runtime_dir),
+        "surfel_dir": str(args.surfel_dir),
+        "calibration_id": artifact.calibration_id,
+        "counts": {
+            "grounded": int(np.count_nonzero(states == SURFEL_GROUNDED)),
+            "plateau": int(np.count_nonzero(states == SURFEL_PLATEAU)),
+            "ascended": int(np.count_nonzero(states == SURFEL_ASCENDED)),
+            "promoted_points": int(len(promoted_cloud)),
+        },
+        "residuals_to_promoted_cloud": {
+            "ascended": asc_stats,
+            "plateau": plateau_stats,
+            "grounded_sample": grounded_stats,
+        },
+        "recommendation": (
+            "ascended surfels are cleaner than plateau; proceed with one-knob densification"
+            if asc_better
+            else "ascended surfels are not yet tighter than plateau; hold densification and tighten guard/support first"
+        ),
+    }
+    (args.output_dir / "surfel_quality.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    print(f"[surfel-quality] wrote summary: {args.output_dir / 'surfel_quality.json'}")
+    print(
+        "[surfel-quality] residuals to promoted cloud: "
+        f"ascended_mean={asc_stats['mean']:.4f} "
+        f"plateau_mean={plateau_stats['mean']:.4f} "
+        f"grounded_sample_mean={grounded_stats['mean']:.4f}"
+    )
+    print(
+        "[surfel-quality] counts: "
+        f"ascended={summary['counts']['ascended']} "
+        f"plateau={summary['counts']['plateau']} "
+        f"promoted_points={summary['counts']['promoted_points']}"
+    )
+
+
+if __name__ == "__main__":
+    main()
