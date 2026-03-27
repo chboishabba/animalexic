@@ -54,3 +54,6 @@
 - Updated voxel scoring to use mean evidence and residual-weighted accumulation:
   - `S_t = (E_t / max(H_t,1)) * (1 + beta * min(H_t, H_max))`
   - per-ray contribution multiplied by `exp(-rho / sigma_rho)`
+- Added a surfel accumulation path:
+  - `scripts/surfel_guard.py` implements surfel accumulation and guards mirroring the voxel path (mean evidence, residual weighting, beta/gamma neighbor term)
+  - `scripts/promoted_depth_to_surfel.py` projects promoted depth into surfels and emits NPZ/PLY artifacts for inspection

@@ -189,6 +189,11 @@
   - guard scoring now uses mean evidence and residual-weighted accumulation:
     - `S_t = (E_t / max(H_t,1)) * (1 + beta * min(H_t, H_max))`
     - per-ray contribution is also weighted by `exp(-rho / sigma_rho)`
+  - a beta/neighbor sweep found the best voxel ordering at roughly `beta=0.35`, `gamma=0.20`, with asc_mean < plat_mean but small ascended count
+  - a surfel path is now available:
+    - `scripts/surfel_guard.py` (surfel accumulation + guard)
+    - `scripts/promoted_depth_to_surfel.py` consumes promoted-depth NPZ artifacts and emits surfel states/PLY
+    - guards mirror the voxel path (mean evidence, residual weighting, beta/gamma neighbor term)
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

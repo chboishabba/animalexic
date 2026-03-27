@@ -31,6 +31,7 @@
   - use the result to decide whether to increase `h_a` or lower `tau_a` next
 - Keep `h_a` as the first guard knob to try on the exact voxel path, but do not assume it improves quality by itself: the first verifier run shows ascended residuals are slightly worse than plateau (`0.3379` vs `0.3145`), and the first `h_a=3` sweep tightened counts without improving residuals (`0.3585` ascended vs `0.3051` plateau).
 - Next guard sweep candidate after `h_a` should be temporal weighting (`beta`) rather than lowering `tau_a`.
+- Surfel path added (`scripts/surfel_guard.py`, `scripts/promoted_depth_to_surfel.py`); evaluate on the lossless run to see if it increases coherent ascended structure without breaking asc_mean < plat_mean.
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.
 - Tune evidence accumulation parameters (min_evidence_frames, weak_conf_scale, decay) for relative 3D stability.
 - Draft failure-handling heuristics for Regime B (low overlap, desync, rolling shutter) and choose refresh policy for extrinsics drift.
