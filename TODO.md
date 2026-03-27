@@ -36,8 +36,9 @@
 - Rework surfel guard correctness before any growth sweep:
   - inspect why ascended surfels drift farther from the promoted cloud than plateau despite stricter state
   - keep the surfel anchor on a real observed point and verify centroid drift separately
-  - test tighter support rules or merge criteria before changing density knobs
-  - only resume densification once surfel quality re-establishes `asc_mean < plat_mean`
+  - keep surfel merges cross-frame only; same-frame neighboring points were the main source of false temporal support
+  - next verifier step should separate singleton plateau surfels from true multi-frame plateau candidates, because the current plateau bucket is dominated by exact singletons with zero centroid residual
+  - only resume densification once the multi-frame promoted surfel core is measurably tighter than the relevant non-promoted multi-frame comparison set
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.
 - Tune evidence accumulation parameters (min_evidence_frames, weak_conf_scale, decay) for relative 3D stability.
 - Draft failure-handling heuristics for Regime B (low overlap, desync, rolling shutter) and choose refresh policy for extrinsics drift.

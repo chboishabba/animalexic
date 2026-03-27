@@ -144,6 +144,8 @@ def main() -> None:
     ap.add_argument("--gamma-neighbor", dest="gamma_neighbor", type=float, default=0.20)
     ap.add_argument("--spread-sigma", type=float, default=0.10)
     ap.add_argument("--spread-max", type=float, default=0.08)
+    ap.add_argument("--drift-sigma", type=float, default=0.05)
+    ap.add_argument("--drift-max", type=float, default=0.05)
     ap.add_argument("--save-ply", action="store_true")
     args = ap.parse_args()
 
@@ -231,6 +233,8 @@ def main() -> None:
         normal_eps=float(args.normal_eps),
         spread_sigma=float(args.spread_sigma),
         spread_max=float(args.spread_max),
+        drift_sigma=float(args.drift_sigma),
+        drift_max=float(args.drift_max),
     )
     surfels = accumulate_candidate_surfels(frame_points, frame_weights, frame_residuals, params)
     states = guard_surfels(surfels, params)
@@ -246,6 +250,9 @@ def main() -> None:
         normal=np.stack([s["normal"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
         weight=np.array([s["weight"] for s in surfels], dtype=np.float32),
         hits=np.array([s["hits"] for s in surfels], dtype=np.float32),
+        frame_hits=np.array([s.get("frame_hits", s["hits"]) for s in surfels], dtype=np.float32),
+        frame_count=np.array([s.get("frame_count", 1) for s in surfels], dtype=np.int32),
+        obs_count=np.array([s.get("obs_count", s["hits"]) for s in surfels], dtype=np.float32),
         residual=np.array([s["residual"] for s in surfels], dtype=np.float32),
         residual_ema=np.array([s.get("residual_ema", s["residual"]) for s in surfels], dtype=np.float32),
         support_spread=np.array([s.get("support_spread", 0.0) for s in surfels], dtype=np.float32),

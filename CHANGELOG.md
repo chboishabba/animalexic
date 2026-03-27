@@ -63,3 +63,7 @@
   - `scripts/surfel_guard.py` now keeps a surface anchor (`pos`) plus a merged centroid and support-spread statistic instead of letting the public surfel position drift silently off-surface
   - `scripts/surfel_quality.py` now reports centroid residuals and support spread in addition to anchor residuals
   - with the corrected representation, the best recovered ascended core (`outputs/surfel_expand24_beta035_gamma020_v6`, `tau_a=0.2`) is 1 surfel and still worse than plateau on centroid residual (`0.0178` vs `0.0000`), so the next surfel work is merge-geometry correction, not threshold sweeping
+- Corrected the surfel merge semantics to only merge across frames and to separate temporal support from raw observation count:
+  - `scripts/surfel_guard.py` now blocks same-frame merges, tracks both decayed `frame_hits` and integer `frame_count`, and uses frame count for ascension
+  - on the fixed house segment, the new best cross-frame run (`outputs/surfel_expand24_crossframe_v1`) recovers 9 ascended surfels with much lower centroid drift (`0.0024` mean) than the earlier merged-surface attempts (`0.0164` / `0.0178`)
+  - plateau remains dominated by exact singleton surfels with zero centroid residual, so the next surfel problem surface is verifier/governance for multi-frame surfels rather than more merge-threshold tuning

@@ -30,6 +30,8 @@ class SurfelGuardParams:
     normal_eps: float = 0.52  # radians (~30 deg)
     spread_sigma: float = 0.10
     spread_max: float = 0.08
+    drift_sigma: float = 0.05
+    drift_max: float = 0.05
 
 
 def _cell_key(pos: np.ndarray, cell_size: float) -> Tuple[int, int, int]:
@@ -54,7 +56,7 @@ def accumulate_candidate_surfels(
     surfels: List[dict] = []
     grid: dict[Tuple[int, int, int], List[int]] = {}
 
-    for points_xyz, weights, residuals in zip(frame_points, frame_weights, frame_residuals):
+    for frame_idx, (points_xyz, weights, residuals) in enumerate(zip(frame_points, frame_weights, frame_residuals)):
         if len(points_xyz) == 0:
             continue
         for pos, w, residual in zip(points_xyz, weights, residuals):
@@ -74,6 +76,8 @@ def accumulate_candidate_surfels(
                 nk = (key[0] + dk[0], key[1] + dk[1], key[2] + dk[2])
                 for idx in grid.get(nk, []):
                     s = surfels[idx]
+                    if int(s.get("last_frame", -1)) == int(frame_idx):
+                        continue
                     dist = float(np.linalg.norm(pos - s["pos"]))
                     if dist < best_dist:
                         ang = _angle_between(n, s["normal"])
@@ -92,6 +96,10 @@ def accumulate_candidate_surfels(
                         "normal": n.astype(np.float32),
                         "weight": contrib,
                         "hits": 1.0,
+                        "frame_hits": 1.0,
+                        "frame_count": 1,
+                        "obs_count": 1.0,
+                        "last_frame": int(frame_idx),
                         "residual": float(residual),
                         "residual_ema": float(residual),
                         "support_spread": 0.0,
@@ -110,7 +118,11 @@ def accumulate_candidate_surfels(
                 if n_norm > 1e-6:
                     s["normal"] /= n_norm
                 s["weight"] = float(params.alpha) * s["weight"] + contrib
-                s["hits"] = float(params.alpha_h) * s["hits"] + 1.0
+                s["obs_count"] = float(params.alpha_h) * s["obs_count"] + 1.0
+                if int(s.get("last_frame", -1)) != int(frame_idx):
+                    s["frame_hits"] = float(params.alpha_h) * s["frame_hits"] + 1.0
+                    s["frame_count"] = int(s.get("frame_count", 1)) + 1
+                    s["last_frame"] = int(frame_idx)
                 if float(residual) <= float(s["residual"]):
                     # Keep the surfel anchored to the best-supported observed surface point
                     # instead of drifting the output position toward an off-surface centroid.
@@ -130,20 +142,25 @@ def guard_surfels(surfels: List[dict], params: SurfelGuardParams) -> list[int]:
     neighbor_norm = np.ones(len(surfels), dtype=np.float32)
 
     for s in surfels:
-        mean_e = s["weight"] / max(s["hits"], 1.0)
-        score = mean_e * (1.0 + float(params.beta) * min(s["hits"], float(params.h_max)))
+        frame_hits = float(s.get("frame_hits", s["hits"]))
+        frame_count = int(s.get("frame_count", max(1, int(round(frame_hits)))))
+        mean_e = s["weight"] / max(frame_hits, 1.0)
+        score = mean_e * (1.0 + float(params.beta) * min(frame_hits, float(params.h_max)))
         score *= (1.0 + float(params.gamma_neighbor) * neighbor_norm[len(states)])
         spread_penalty = float(np.exp(-float(s.get("support_spread", 0.0)) / max(1e-6, float(params.spread_sigma))))
+        centroid = s.get("centroid", s["pos"])
+        centroid_drift = float(np.linalg.norm(centroid - s["pos"]))
+        drift_penalty = float(np.exp(-centroid_drift / max(1e-6, float(params.drift_sigma))))
         residual_gate = float(np.exp(-float(s.get("residual_ema", s["residual"])) / max(1e-6, float(params.sigma_rho))))
-        score *= spread_penalty * residual_gate
+        score *= spread_penalty * drift_penalty * residual_gate
         state = SURFEL_GROUNDED
         if score >= float(params.tau_p):
             state = SURFEL_PLATEAU
         if (
             score >= float(params.tau_a)
-            and s["hits"] >= float(params.h_a)
+            and frame_count >= int(np.ceil(float(params.h_a)))
             and s["residual"] <= float(params.epsilon_rho)
-            and float(s.get("support_spread", 0.0)) <= float(params.spread_max)
+            and centroid_drift <= float(params.drift_max)
         ):
             state = SURFEL_ASCENDED
         states.append(state)

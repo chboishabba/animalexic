@@ -208,7 +208,16 @@
       - ascended centroid mean residual `0.0178`
       - plateau centroid mean residual `0.0000`
       - grounded sample centroid mean residual `0.0043`
-    - this means the current surfel bottleneck is centroid drift under merging; the next surfel work is merge-geometry correction, not threshold sweeps or densification
+    - surfel accumulation now only merges across frames and tracks:
+      - decayed `frame_hits` for temporal score
+      - integer `frame_count` for ascension
+      - separate `obs_count` for raw merged observations
+    - the best cross-frame validation on `outputs/surfel_expand24_crossframe_v1` found:
+      - ascended count `9`
+      - ascended centroid mean residual `0.0024`
+      - plateau centroid mean residual `0.0000`
+      - grounded sample centroid mean residual `0.0032`
+    - this is a real improvement over the earlier merged-surface runs, but plateau is still dominated by exact singletons; the next surfel bottleneck is now verifier/governance for multi-frame surfels, not same-frame merge cleanup
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
