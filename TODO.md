@@ -42,7 +42,8 @@
   - first `tau_a` sweep is complete; a conservative densified point is around `tau_a=0.02`, which yields `71` ascended surfels with centroid residual `0.0119` versus `0.0252` for the non-promoted multi-frame set
   - keep `tau_a=0.02` as the new densified baseline rather than the fully-open `tau_a=0.00` run, which reaches `215` ascended surfels but reduces quality headroom
   - `beta` sweep from the `tau_a=0.02` baseline is also complete; the current preferred operating point is `beta=1.00`, which yields `103` ascended surfels with centroid residual `0.0124` versus `0.0265` for the non-promoted multi-frame set
-  - next knob should be `gamma_neighbor` or a merge-radius/support refinement from the `tau_a=0.02`, `beta=1.00` baseline, not more `tau_a` digging
+  - `gamma_neighbor` sweep from the `tau_a=0.02`, `beta=1.00` baseline is also complete; the current preferred operating point is `gamma_neighbor=1.50`, which yields `157` ascended surfels with centroid residual `0.0144` versus `0.0283` for the non-promoted multi-frame set
+  - next knob should be a merge-radius/support refinement or a bounded continuation of `gamma_neighbor` from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50` baseline
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.

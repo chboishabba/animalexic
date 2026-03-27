@@ -238,7 +238,17 @@
       - cross-frame-only merge semantics
       - `tau_a=0.02`
       - `beta=1.00`
-    - the next surfel surface is now a third knob (`gamma_neighbor` or a merge-support radius refinement), not more `tau_a`/`beta` digging
+    - third controlled densification sweep then increased only `gamma_neighbor` from that baseline
+    - key points:
+      - `gamma_neighbor=0.00`: `92` ascended, centroid residual `0.0124` vs `0.0260`
+      - `gamma_neighbor=0.60`: `121` ascended, centroid residual `0.0131` vs `0.0271`
+      - `gamma_neighbor=1.50`: `157` ascended, centroid residual `0.0144` vs `0.0283`
+    - the current preferred operating point is therefore:
+      - cross-frame-only merge semantics
+      - `tau_a=0.02`
+      - `beta=1.00`
+      - `gamma_neighbor=1.50`
+    - the next surfel surface is now a merge-radius/support refinement or a bounded continuation of `gamma_neighbor`, not more `tau_a`/`beta` digging
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

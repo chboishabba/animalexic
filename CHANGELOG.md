@@ -79,3 +79,7 @@
   - `beta=0.25 -> 1.00` increased ascended surfels from `59` to `103`
   - centroid residual remained stable across the sweep (`0.0109 -> 0.0124`) and stayed well below the non-promoted multi-frame set (`0.0249 -> 0.0265`)
   - the current preferred surfel operating point is `tau_a=0.02`, `beta=1.00` on the cross-frame merge semantics
+- Ran the third one-knob densification sweep on the `tau_a=0.02`, `beta=1.00` baseline by increasing `gamma_neighbor` only:
+  - `gamma_neighbor=0.00 -> 1.50` increased ascended surfels from `92` to `157`
+  - centroid residual drift stayed controlled (`0.0124 -> 0.0144`) and remained well below the non-promoted multi-frame set (`0.0260 -> 0.0283`)
+  - the current preferred surfel operating point is now `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50` on the cross-frame merge semantics
