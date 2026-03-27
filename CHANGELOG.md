@@ -83,3 +83,7 @@
   - `gamma_neighbor=0.00 -> 1.50` increased ascended surfels from `92` to `157`
   - centroid residual drift stayed controlled (`0.0124 -> 0.0144`) and remained well below the non-promoted multi-frame set (`0.0260 -> 0.0283`)
   - the current preferred surfel operating point is now `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50` on the cross-frame merge semantics
+- Ran the merge-radius sweep on the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50` baseline by changing `pos_eps` only:
+  - tightening `pos_eps` from `0.30 -> 0.15` improved the regime monotonically on the fixed segment
+  - `pos_eps=0.15` is the new preferred point: `165` ascended surfels with centroid residual `0.0140` versus `0.0236` for the non-promoted multi-frame set
+  - wider merge radii increased the size and error of the non-promoted multi-frame set faster than they improved the promoted set, so the next surfel surface is another geometry-aware merge constraint rather than a broader spatial radius

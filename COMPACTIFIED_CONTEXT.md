@@ -248,7 +248,18 @@
       - `tau_a=0.02`
       - `beta=1.00`
       - `gamma_neighbor=1.50`
-    - the next surfel surface is now a merge-radius/support refinement or a bounded continuation of `gamma_neighbor`, not more `tau_a`/`beta` digging
+    - merge-radius sweep then changed only `pos_eps` from that baseline
+    - key points:
+      - `pos_eps=0.30`: `121` ascended, centroid residual `0.0164` vs `0.0452`
+      - `pos_eps=0.20`: `157` ascended, centroid residual `0.0144` vs `0.0283`
+      - `pos_eps=0.15`: `165` ascended, centroid residual `0.0140` vs `0.0236`
+    - the current preferred operating point is therefore:
+      - cross-frame-only merge semantics
+      - `tau_a=0.02`
+      - `beta=1.00`
+      - `gamma_neighbor=1.50`
+      - `pos_eps=0.15`
+    - the next surfel surface is now another merge-geometry refinement, most likely a depth-consistency gate
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
