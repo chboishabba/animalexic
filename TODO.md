@@ -61,8 +61,11 @@
   - `outputs/runtime_npbi_expand72_lossless` yielded `42` usable runtime frames
   - `outputs/surfel_earlystop_long_probe` stopped at frame `31` under the current policy
   - `outputs/surfel_quality_earlystop_long_probe/surfel_quality.json` still shows a positive verified centroid margin of `+0.01171`
-- Treat frame `31` as the current measured ingest horizon for this source/config until a better object-aware metric replaces the present merge/quality proxy.
-  - next knob should be a depth-consistency gate or another merge-geometry refinement from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50`, `pos_eps=0.15` baseline
+- Treat frame `32` as the current measured ingest horizon for this source/config until a better object-aware metric replaces the present merge/quality proxy.
+  - the current verified stop-state margin is about `+0.0089` (`0.0253 - 0.0164`)
+  - next surfel work should switch from threshold tuning to structure extraction: build local surfel neighborhoods, fit PCA normals/curvature, and emit connected surface clusters from the existing ascended support
+  - keep true RGB/object-centered overlay replay deferred until the runtime persists original color frames; the current overlay renderer is still forced to use rectified grayscale matcher inputs
+- Initial surfel clustering is now implemented in `scripts/surfel_cluster.py`; the next iteration should tune neighborhood/edge thresholds against visual/object coherence and decide whether plateau surfels should be admitted into the clustering pass.
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.

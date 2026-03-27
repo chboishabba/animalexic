@@ -103,3 +103,7 @@
   - the longer calibrated run produced `42` usable runtime frames before decode exhaustion
   - with the current stop policy (`window=4`, `min_frames_before_stop=12`, `min_ascended_before_stop=20`, `min_new_ascended=1`, `min_residual_improvement=0.0`), surfel accumulation stops at frame `31`
   - the stopped state still passes the offline governance check: `ascended_mean=0.0148`, `nonpromoted_multiframe_mean=0.0266`, verified centroid margin `+0.01171`
+- Added the first object-centric surfel structure extraction utility:
+  - `scripts/surfel_cluster.py` builds local surfel neighborhoods, fits PCA normals/curvature, forms connected components under distance/normal/curvature constraints, and emits colored cluster outputs
+  - initial run on `outputs/surfel_earlystop_long_probe` produces `5` retained clusters from `141` ascended surfels, with `61` surfels left as noise under the default thresholds
+  - this establishes the next surface-building layer without changing the governed surfel accumulation path itself

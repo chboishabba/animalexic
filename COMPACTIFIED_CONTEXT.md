@@ -274,8 +274,14 @@
       - the per-frame quality metric is now `residual_margin = nonpromoted_multiframe_mean_residual - ascended_mean_residual`
       - the offline verifier exposes the corresponding promoted-state metric as `governance.centroid_margin_vs_nonpromoted_multiframe`
       - current verified baseline margin on the preferred 24-frame run is `+0.00965`
-      - extending the same source/config beyond 24 frames produces `42` usable runtime frames and the current stop policy halts surfel accumulation at frame `31`
-      - that stopped state still passes the offline verifier with centroid margin `+0.01171` (`0.0266 - 0.0148`)
+      - extending the same source/config beyond 24 frames produces `42` usable runtime frames and the current stop policy halts surfel accumulation at frame `32`
+      - that stopped state still passes the offline verifier with centroid margin about `+0.0089` (`0.0253 - 0.0164`)
+    - current viewer limitation:
+      - image-space overlay exists, but it still draws on rectified grayscale matcher inputs because the runtime does not yet persist original RGB frames
+      - the next object-centric step is therefore surfel clustering / local surface formation from the trusted promoted state, not more overlay tuning on the grayscale canvas
+    - that clustering step is now present:
+      - `scripts/surfel_cluster.py` clusters the current surfel state using local PCA normals/curvature plus connected components
+      - the first run on `outputs/surfel_earlystop_long_probe` yields `5` retained clusters from `141` ascended surfels, with `61` surfels rejected as noise under the default thresholds
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
