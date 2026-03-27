@@ -110,3 +110,10 @@
 - Added the first standard-backend reconstruction bridge:
   - `scripts/surfel_to_open3d_poisson.py` exports governed surfels as oriented weighted points and, when Open3D is available, runs Poisson reconstruction plus density-based mesh filtering
   - validation on `outputs/surfel_earlystop_long_probe` succeeded for the export path; the current environment does not have `open3d` installed, so the script writes `oriented_points.xyzwn`, `oriented_points_weighted.ply`, and `poisson_summary.json` but skips mesh generation cleanly
+- Upgraded the object-centric path from raw clustering to `ascended core -> plateau expansion -> selected object`:
+  - `scripts/surfel_cluster.py` now clusters ascended surfels into core components, optionally attaches nearby plateau surfels, scores clusters, and emits a selected-object mask
+  - the first expanded run on `outputs/surfel_earlystop_long_probe` yields `5` core clusters and selects a `37`-surfel object candidate (`28` ascended + `9` plateau)
+  - `scripts/surfel_to_open3d_poisson.py` now accepts `--cluster-dir` and `--cluster-selection`, so Poisson can be driven from the selected object instead of raw state filters
+- Improved replay inspection for object reading:
+  - `scripts/render_surfel_replay_webm.py` now supports `--crop-to-ascended` so the replay view follows projected ascended support instead of the full-frame grayscale matcher canvas
+  - generated `outputs/surfel_earlystop_long_probe/surfel_overlay_replay_cropped.webm` as the first object-centered replay pass

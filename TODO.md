@@ -71,6 +71,13 @@
   - start with ascended-only input, then compare against ascended+plateau as an explicit option
   - treat normal orientation consistency and confidence/weight usage as the main open questions, not custom triangle-building logic
 - `scripts/surfel_to_open3d_poisson.py` now exists and its export path is validated; the current blocker for full Poisson meshing in this repo environment is simply that `open3d` is not installed.
+- Core→expand object selection is now implemented:
+  - `scripts/surfel_cluster.py --expand-plateau` produces a selected-object mask that should become the default Poisson input for object reconstruction experiments
+  - next tuning step is cluster scoring / expansion thresholds, not more raw surfel-threshold growth
+- Compare three reconstruction inputs explicitly on the balloon segment:
+  - `ascended`
+  - `ascended_plateau`
+  - `selected_object` from the cluster-expanded path
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.

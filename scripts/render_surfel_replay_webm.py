@@ -129,6 +129,8 @@ def _draw_overlay_panel(
     q_matrix: np.ndarray,
     title: str,
     show_all: bool,
+    crop_to_ascended: bool,
+    crop_margin: int,
 ) -> np.ndarray:
     canvas = frame_bgr.copy()
     overlay = canvas.copy()
@@ -144,6 +146,19 @@ def _draw_overlay_panel(
     uv, depth = _project_to_image(pts, q_matrix)
     if uv.size == 0:
         return canvas
+    crop = None
+    if crop_to_ascended:
+        asc_pts = points[states == SURFEL_ASCENDED]
+        asc_uv, _ = _project_to_image(asc_pts, q_matrix)
+        if asc_uv.size:
+            xs = asc_uv[:, 0]
+            ys = asc_uv[:, 1]
+            x0 = max(0, int(np.floor(np.min(xs))) - int(crop_margin))
+            y0 = max(0, int(np.floor(np.min(ys))) - int(crop_margin))
+            x1 = min(w, int(np.ceil(np.max(xs))) + int(crop_margin))
+            y1 = min(h, int(np.ceil(np.max(ys))) + int(crop_margin))
+            if x1 > x0 and y1 > y0:
+                crop = (x0, y0, x1, y1)
     order = np.argsort(depth)[::-1]
     uv = uv[order]
     depth = depth[order]
@@ -164,15 +179,20 @@ def _draw_overlay_panel(
         depth_norm = (z - dmin) / drange
         color = palette.get(int(state), palette[SURFEL_GROUNDED]).copy()
         color = np.clip(color * (0.60 + 0.50 * (1.0 - depth_norm)), 0, 255).astype(np.uint8)
-        radius_px = 2 if int(state) != SURFEL_ASCENDED else 3
+        radius_px = 1 if int(state) == SURFEL_GROUNDED else (2 if int(state) == SURFEL_PLATEAU else 3)
         cv2.circle(overlay, (xi, yi), radius_px, tuple(int(c) for c in color), thickness=-1, lineType=cv2.LINE_AA)
-    canvas = cv2.addWeighted(overlay, 0.75, canvas, 0.25, 0.0)
+    canvas = cv2.addWeighted(overlay, 0.80, canvas, 0.20, 0.0)
     subtitle = (
         f"asc {int(np.count_nonzero(states == SURFEL_ASCENDED))}  "
         f"plat {int(np.count_nonzero(states == SURFEL_PLATEAU))}  "
         f"ground {int(np.count_nonzero(states == SURFEL_GROUNDED))}"
     )
     cv2.putText(canvas, subtitle, (12, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1, cv2.LINE_AA)
+    if crop is not None:
+        x0, y0, x1, y1 = crop
+        cropped = canvas[y0:y1, x0:x1]
+        if cropped.size:
+            canvas = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
     return canvas
 
 
@@ -189,6 +209,8 @@ def main() -> None:
     ap.add_argument("--title", type=str, default="Animalexic Surfel Replay")
     ap.add_argument("--runtime-dir", type=Path, help="Runtime output dir containing left_input_fNNNN.png for image-space overlay replay")
     ap.add_argument("--calibration", type=Path, help="Calibration artifact used to project surfels back into image space")
+    ap.add_argument("--crop-to-ascended", action="store_true", help="Crop the overlay view to the projected ascended support")
+    ap.add_argument("--crop-margin", type=int, default=24)
     args = ap.parse_args()
 
     files = _snapshot_files(args.snapshots_dir)
@@ -240,6 +262,8 @@ def main() -> None:
                 q_matrix=artifact.q_matrix,
                 title=f"{args.title} | all states",
                 show_all=True,
+                crop_to_ascended=bool(args.crop_to_ascended),
+                crop_margin=int(args.crop_margin),
             )
             right = _draw_overlay_panel(
                 left_frame,
@@ -248,6 +272,8 @@ def main() -> None:
                 q_matrix=artifact.q_matrix,
                 title=f"{args.title} | ascended only",
                 show_all=False,
+                crop_to_ascended=bool(args.crop_to_ascended),
+                crop_margin=int(args.crop_margin),
             )
             if left.shape[1] != panel_w or left.shape[0] != panel_h:
                 left = cv2.resize(left, (panel_w, panel_h), interpolation=cv2.INTER_LINEAR)

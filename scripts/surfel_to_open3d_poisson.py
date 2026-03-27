@@ -58,6 +58,8 @@ def main() -> None:
     ap.add_argument("--surfel-dir", type=Path, required=True)
     ap.add_argument("--output-dir", type=Path, required=True)
     ap.add_argument("--state-filter", choices=["ascended", "ascended_plateau"], default="ascended")
+    ap.add_argument("--cluster-dir", type=Path, help="Optional cluster output dir from surfel_cluster.py")
+    ap.add_argument("--cluster-selection", choices=["selected_object", "all_clustered"], default="selected_object")
     ap.add_argument("--poisson-depth", type=int, default=8)
     ap.add_argument("--density-quantile-keep", type=float, default=0.10, help="Drop lowest-density vertices below this quantile")
     ap.add_argument("--scale", type=float, default=1.1)
@@ -75,6 +77,19 @@ def main() -> None:
     states = blob["states"].astype(np.uint8)
 
     keep = _state_mask(states, args.state_filter)
+    cluster_mode = None
+    if args.cluster_dir:
+        cluster_blob = np.load(args.cluster_dir / "surfel_clusters.npz")
+        if args.cluster_selection == "selected_object":
+            cluster_keep = cluster_blob["selected_mask"].astype(np.uint8) != 0
+            cluster_mode = "selected_object"
+        else:
+            cluster_keep = cluster_blob["labels"].astype(np.int32) >= 0
+            cluster_mode = "all_clustered"
+        if cluster_keep.shape[0] != keep.shape[0]:
+            raise SystemExit("cluster selection does not match surfel state length")
+        keep &= cluster_keep
+
     points = pos[keep]
     normals = normals[keep]
     weights = weights[keep]
@@ -92,6 +107,7 @@ def main() -> None:
     summary: dict[str, object] = {
         "surfel_dir": str(args.surfel_dir),
         "state_filter": args.state_filter,
+        "cluster_selection": cluster_mode,
         "counts": {"selected_surfels": int(len(points))},
         "params": {
             "poisson_depth": int(args.poisson_depth),
@@ -131,24 +147,30 @@ def main() -> None:
     mesh_path = args.output_dir / "poisson_mesh.ply"
     density_mesh_path = args.output_dir / "poisson_mesh_filtered.ply"
     o3d.io.write_triangle_mesh(str(mesh_path), mesh)
+    mesh_vertices = int(np.asarray(mesh.vertices).shape[0])
+    mesh_triangles = int(np.asarray(mesh.triangles).shape[0])
 
     if densities_np.size:
         cutoff = float(np.quantile(densities_np, float(args.density_quantile_keep)))
         keep_vertices = densities_np >= cutoff
-        mesh_filtered = mesh.remove_vertices_by_mask(~keep_vertices)
+        mesh_filtered = o3d.geometry.TriangleMesh(mesh)
+        mesh_filtered.remove_vertices_by_mask(~keep_vertices)
         o3d.io.write_triangle_mesh(str(density_mesh_path), mesh_filtered)
-        filtered_vertices = int(np.count_nonzero(keep_vertices))
+        filtered_vertices = int(np.asarray(mesh_filtered.vertices).shape[0])
+        filtered_triangles = int(np.asarray(mesh_filtered.triangles).shape[0])
     else:
         cutoff = 0.0
         filtered_vertices = 0
+        filtered_triangles = 0
 
     summary["open3d"] = {
         "available": True,
         "mesh_path": str(mesh_path),
         "filtered_mesh_path": str(density_mesh_path),
-        "mesh_vertices": int(np.asarray(mesh.vertices).shape[0]),
-        "mesh_triangles": int(np.asarray(mesh.triangles).shape[0]),
-        "filtered_vertices_kept": filtered_vertices,
+        "mesh_vertices": mesh_vertices,
+        "mesh_triangles": mesh_triangles,
+        "filtered_mesh_vertices": filtered_vertices,
+        "filtered_mesh_triangles": filtered_triangles,
         "density_cutoff": cutoff,
         "density_stats": _density_stats(densities_np),
     }

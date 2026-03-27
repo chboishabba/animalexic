@@ -288,7 +288,13 @@
       - dense surface reconstruction should now use a standard backend (Open3D Poisson first) driven by exported oriented surfels plus weights
     - that backend bridge is now present:
       - `scripts/surfel_to_open3d_poisson.py` exports oriented weighted surfels and can run Open3D Poisson when available
-      - current environment does not have `open3d` installed, so the validated behavior is export-only (`oriented_points.xyzwn`, weighted PLY, summary JSON) with clean mesh-generation deferral
+      - `open3d` is now available in a separate `.venv-o3d` environment and the Poisson path is working on current outputs
+    - object-centric selection path is now stronger than raw state filtering:
+      - `scripts/surfel_cluster.py --expand-plateau` yields `5` core clusters on `outputs/surfel_earlystop_long_probe` and selects a `37`-surfel object candidate
+      - `scripts/surfel_to_open3d_poisson.py --cluster-dir ... --cluster-selection selected_object` reconstructs directly from that selected object
+    - viewer/readability path is improved but still limited by grayscale matcher inputs:
+      - `scripts/render_surfel_replay_webm.py --crop-to-ascended` now generates an object-centered crop replay
+      - current artifact: `outputs/surfel_earlystop_long_probe/surfel_overlay_replay_cropped.webm`
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list
