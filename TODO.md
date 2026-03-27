@@ -35,6 +35,7 @@
 - Hold surfel densification for now. The first verified surfel run (`outputs/surfel_expand24_beta035_gamma020_v2`) produced 5 ascended surfels, but `scripts/surfel_quality.py` shows ascended residuals are worse than plateau (`0.0238` vs `0.0010`), so the next step is guard/support correction rather than beta/gamma/radius expansion.
 - Rework surfel guard correctness before any growth sweep:
   - inspect why ascended surfels drift farther from the promoted cloud than plateau despite stricter state
+  - keep the surfel anchor on a real observed point and verify centroid drift separately
   - test tighter support rules or merge criteria before changing density knobs
   - only resume densification once surfel quality re-establishes `asc_mean < plat_mean`
 - Tune temporal merge thresholds (cost/gap/close-disp/age) on clean SBS CGI and a real fixed-rig clip; document preferred defaults.

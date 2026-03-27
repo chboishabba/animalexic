@@ -196,11 +196,19 @@
     - guards mirror the voxel path (mean evidence, residual weighting, beta/gamma neighbor term)
   - surfel verification is now in place:
     - `scripts/surfel_quality.py` measures nearest-promoted-cloud residuals for ascended, plateau, and grounded surfels
-    - first validation on `outputs/surfel_expand24_beta035_gamma020_v2` found:
+    - the initial anchor-only metric on `outputs/surfel_expand24_beta035_gamma020_v2` found:
       - ascended mean residual `0.0238`
       - plateau mean residual `0.0010`
       - grounded sample mean residual `0.0049`
-    - this means surfel ascended state is not yet ordering quality correctly; the next surfel work is guard/support correction, not densification
+    - surfel state now keeps both:
+      - `pos`: best-supported observed anchor point
+      - `centroid`: merged support center
+      - `support_spread`: max merge distance admitted into the surfel
+    - the corrected centroid-aware validation on `outputs/surfel_expand24_beta035_gamma020_v6` found:
+      - ascended centroid mean residual `0.0178`
+      - plateau centroid mean residual `0.0000`
+      - grounded sample centroid mean residual `0.0043`
+    - this means the current surfel bottleneck is centroid drift under merging; the next surfel work is merge-geometry correction, not threshold sweeps or densification
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

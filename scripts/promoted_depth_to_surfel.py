@@ -142,6 +142,8 @@ def main() -> None:
     ap.add_argument("--epsilon-rho", type=float, default=64.0)
     ap.add_argument("--sigma-rho", type=float, default=24.0)
     ap.add_argument("--gamma-neighbor", dest="gamma_neighbor", type=float, default=0.20)
+    ap.add_argument("--spread-sigma", type=float, default=0.10)
+    ap.add_argument("--spread-max", type=float, default=0.08)
     ap.add_argument("--save-ply", action="store_true")
     args = ap.parse_args()
 
@@ -227,6 +229,8 @@ def main() -> None:
         cell_size=float(args.cell_size),
         pos_eps=float(args.pos_eps),
         normal_eps=float(args.normal_eps),
+        spread_sigma=float(args.spread_sigma),
+        spread_max=float(args.spread_max),
     )
     surfels = accumulate_candidate_surfels(frame_points, frame_weights, frame_residuals, params)
     states = guard_surfels(surfels, params)
@@ -238,10 +242,13 @@ def main() -> None:
     np.savez_compressed(
         args.output_dir / "surfels_state.npz",
         pos=np.stack([s["pos"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
+        centroid=np.stack([s.get("centroid", s["pos"]) for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
         normal=np.stack([s["normal"] for s in surfels]) if surfels else np.zeros((0, 3), dtype=np.float32),
         weight=np.array([s["weight"] for s in surfels], dtype=np.float32),
         hits=np.array([s["hits"] for s in surfels], dtype=np.float32),
         residual=np.array([s["residual"] for s in surfels], dtype=np.float32),
+        residual_ema=np.array([s.get("residual_ema", s["residual"]) for s in surfels], dtype=np.float32),
+        support_spread=np.array([s.get("support_spread", 0.0) for s in surfels], dtype=np.float32),
         states=np.array(states, dtype=np.uint8),
     )
 

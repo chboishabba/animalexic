@@ -28,6 +28,8 @@ class SurfelGuardParams:
     cell_size: float = 0.25
     pos_eps: float = 0.20
     normal_eps: float = 0.52  # radians (~30 deg)
+    spread_sigma: float = 0.10
+    spread_max: float = 0.08
 
 
 def _cell_key(pos: np.ndarray, cell_size: float) -> Tuple[int, int, int]:
@@ -86,10 +88,13 @@ def accumulate_candidate_surfels(
                 surfels.append(
                     {
                         "pos": pos.astype(np.float32),
+                        "centroid": pos.astype(np.float32),
                         "normal": n.astype(np.float32),
                         "weight": contrib,
                         "hits": 1.0,
                         "residual": float(residual),
+                        "residual_ema": float(residual),
+                        "support_spread": 0.0,
                     }
                 )
                 grid.setdefault(key, []).append(idx)
@@ -98,14 +103,23 @@ def accumulate_candidate_surfels(
                 total_w = s["weight"] + contrib
                 if total_w <= 1e-6:
                     continue
-                s["pos"] = (s["pos"] * s["weight"] + pos * contrib) / total_w
+                merge_dist = float(np.linalg.norm(pos - s["pos"]))
+                s["centroid"] = (s["centroid"] * s["weight"] + pos * contrib) / total_w
                 s["normal"] = s["normal"] * s["weight"] + n * contrib
                 n_norm = float(np.linalg.norm(s["normal"]))
                 if n_norm > 1e-6:
                     s["normal"] /= n_norm
                 s["weight"] = float(params.alpha) * s["weight"] + contrib
                 s["hits"] = float(params.alpha_h) * s["hits"] + 1.0
+                if float(residual) <= float(s["residual"]):
+                    # Keep the surfel anchored to the best-supported observed surface point
+                    # instead of drifting the output position toward an off-surface centroid.
+                    s["pos"] = pos.astype(np.float32)
                 s["residual"] = min(s["residual"], float(residual))
+                s["residual_ema"] = (
+                    float(params.alpha) * s["residual_ema"] + (1.0 - float(params.alpha)) * float(residual)
+                )
+                s["support_spread"] = max(float(s["support_spread"]), merge_dist)
     return surfels
 
 
@@ -119,10 +133,18 @@ def guard_surfels(surfels: List[dict], params: SurfelGuardParams) -> list[int]:
         mean_e = s["weight"] / max(s["hits"], 1.0)
         score = mean_e * (1.0 + float(params.beta) * min(s["hits"], float(params.h_max)))
         score *= (1.0 + float(params.gamma_neighbor) * neighbor_norm[len(states)])
+        spread_penalty = float(np.exp(-float(s.get("support_spread", 0.0)) / max(1e-6, float(params.spread_sigma))))
+        residual_gate = float(np.exp(-float(s.get("residual_ema", s["residual"])) / max(1e-6, float(params.sigma_rho))))
+        score *= spread_penalty * residual_gate
         state = SURFEL_GROUNDED
         if score >= float(params.tau_p):
             state = SURFEL_PLATEAU
-        if score >= float(params.tau_a) and s["hits"] >= float(params.h_a) and s["residual"] <= float(params.epsilon_rho):
+        if (
+            score >= float(params.tau_a)
+            and s["hits"] >= float(params.h_a)
+            and s["residual"] <= float(params.epsilon_rho)
+            and float(s.get("support_spread", 0.0)) <= float(params.spread_max)
+        ):
             state = SURFEL_ASCENDED
         states.append(state)
     return states
@@ -160,4 +182,3 @@ def write_colored_ply_ascii(path: Path, points_xyz: np.ndarray, colors_rgb: np.n
                 f"{float(p[0]):.6f} {float(p[1]):.6f} {float(p[2]):.6f} "
                 f"{int(c[0])} {int(c[1])} {int(c[2])}\n"
             )
-

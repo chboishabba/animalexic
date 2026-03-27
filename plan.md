@@ -66,6 +66,7 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
   - first try increasing temporal persistence (`h_a`)
   - if needed, then lower `tau_a` slightly
 - Keep the guarded downstream seam conservative until the quality checks pass. Surfel output is now available, but the first surfel verifier run shows ascended surfels are worse than plateau on promoted-cloud residuals, so surfel work should focus on guard/support correctness before any densification.
+- Surfel verification now distinguishes anchor position from merged centroid. The current best corrected run still has worse ascended centroid residual than plateau (`0.0178` vs `0.0000`), so the next surfel task is merge-geometry correction rather than more threshold sweeps.
 - Use the calibrated oracle as a teacher on source-aligned runs and optimize for overlap / agreement (`IoU`, false negatives, false positives), not coverage alone.
 - Improve candidate placement with richer evidence and region-level reasoning before attempting another learned promotion gate.
 - Keep learned confidence calibration opt-in until it beats the heuristic decomposed-evidence baseline on aligned compare metrics.

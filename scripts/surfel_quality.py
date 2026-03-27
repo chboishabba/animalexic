@@ -171,10 +171,18 @@ def main() -> None:
     surfel_blob = np.load(surfel_state_path)
     states = surfel_blob["states"].astype(np.uint8)
     pos = surfel_blob["pos"].astype(np.float32)
+    centroid = surfel_blob["centroid"].astype(np.float32) if "centroid" in surfel_blob else pos
+    support_spread = surfel_blob["support_spread"].astype(np.float32) if "support_spread" in surfel_blob else np.zeros((len(pos),), dtype=np.float32)
 
-    ascended = pos[states == SURFEL_ASCENDED]
-    plateau = pos[states == SURFEL_PLATEAU]
-    grounded = pos[states == SURFEL_GROUNDED]
+    asc_mask = states == SURFEL_ASCENDED
+    plat_mask = states == SURFEL_PLATEAU
+    ground_mask = states == SURFEL_GROUNDED
+    ascended = pos[asc_mask]
+    plateau = pos[plat_mask]
+    grounded = pos[ground_mask]
+    ascended_centroid = centroid[asc_mask]
+    plateau_centroid = centroid[plat_mask]
+    grounded_centroid = centroid[ground_mask]
 
     frame_indices = _frame_indices(args.runtime_dir)
     if args.frame_limit > 0:
@@ -207,18 +215,29 @@ def main() -> None:
     promoted_cloud = np.concatenate(promoted_points, axis=0) if promoted_points else np.zeros((0, 3), dtype=np.float32)
 
     grounded_eval = grounded
+    grounded_centroid_eval = grounded_centroid
+    grounded_spread_eval = support_spread[ground_mask]
     if grounded_eval.size > 0 and len(grounded_eval) > int(args.grounded_sample):
         rng = np.random.default_rng(0)
         idx = rng.choice(len(grounded_eval), size=int(args.grounded_sample), replace=False)
         grounded_eval = grounded_eval[idx]
+        grounded_centroid_eval = grounded_centroid_eval[idx]
+        grounded_spread_eval = grounded_spread_eval[idx]
 
-    ascended_dist = _nearest_neighbor_distances(ascended, promoted_cloud)
-    plateau_dist = _nearest_neighbor_distances(plateau, promoted_cloud)
-    grounded_dist = _nearest_neighbor_distances(grounded_eval, promoted_cloud)
+    ascended_anchor_dist = _nearest_neighbor_distances(ascended, promoted_cloud)
+    plateau_anchor_dist = _nearest_neighbor_distances(plateau, promoted_cloud)
+    grounded_anchor_dist = _nearest_neighbor_distances(grounded_eval, promoted_cloud)
 
-    asc_stats = _stats(ascended_dist)
-    plateau_stats = _stats(plateau_dist)
-    grounded_stats = _stats(grounded_dist)
+    ascended_centroid_dist = _nearest_neighbor_distances(ascended_centroid, promoted_cloud)
+    plateau_centroid_dist = _nearest_neighbor_distances(plateau_centroid, promoted_cloud)
+    grounded_centroid_dist = _nearest_neighbor_distances(grounded_centroid_eval, promoted_cloud)
+
+    asc_anchor_stats = _stats(ascended_anchor_dist)
+    plateau_anchor_stats = _stats(plateau_anchor_dist)
+    grounded_anchor_stats = _stats(grounded_anchor_dist)
+    asc_centroid_stats = _stats(ascended_centroid_dist)
+    plateau_centroid_stats = _stats(plateau_centroid_dist)
+    grounded_centroid_stats = _stats(grounded_centroid_dist)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_points_ply_ascii(args.output_dir / "promoted_points.ply", promoted_cloud)
@@ -241,21 +260,33 @@ def main() -> None:
         overlay_cols = np.concatenate(overlay_colors, axis=0)
         write_colored_ply_ascii(args.output_dir / "surfel_overlay.ply", overlay_pts, overlay_cols)
 
-    asc_better = asc_stats["mean"] < plateau_stats["mean"] or not np.isfinite(plateau_stats["mean"])
+    asc_better = asc_centroid_stats["mean"] < plateau_centroid_stats["mean"] or not np.isfinite(plateau_centroid_stats["mean"])
     summary = {
         "runtime_dir": str(args.runtime_dir),
         "surfel_dir": str(args.surfel_dir),
         "calibration_id": artifact.calibration_id,
         "counts": {
-            "grounded": int(np.count_nonzero(states == SURFEL_GROUNDED)),
-            "plateau": int(np.count_nonzero(states == SURFEL_PLATEAU)),
-            "ascended": int(np.count_nonzero(states == SURFEL_ASCENDED)),
+            "grounded": int(np.count_nonzero(ground_mask)),
+            "plateau": int(np.count_nonzero(plat_mask)),
+            "ascended": int(np.count_nonzero(asc_mask)),
             "promoted_points": int(len(promoted_cloud)),
         },
         "residuals_to_promoted_cloud": {
-            "ascended": asc_stats,
-            "plateau": plateau_stats,
-            "grounded_sample": grounded_stats,
+            "anchor": {
+                "ascended": asc_anchor_stats,
+                "plateau": plateau_anchor_stats,
+                "grounded_sample": grounded_anchor_stats,
+            },
+            "centroid": {
+                "ascended": asc_centroid_stats,
+                "plateau": plateau_centroid_stats,
+                "grounded_sample": grounded_centroid_stats,
+            },
+        },
+        "support_spread": {
+            "ascended": _stats(support_spread[asc_mask]),
+            "plateau": _stats(support_spread[plat_mask]),
+            "grounded_sample": _stats(grounded_spread_eval),
         },
         "recommendation": (
             "ascended surfels are cleaner than plateau; proceed with one-knob densification"
@@ -267,10 +298,10 @@ def main() -> None:
 
     print(f"[surfel-quality] wrote summary: {args.output_dir / 'surfel_quality.json'}")
     print(
-        "[surfel-quality] residuals to promoted cloud: "
-        f"ascended_mean={asc_stats['mean']:.4f} "
-        f"plateau_mean={plateau_stats['mean']:.4f} "
-        f"grounded_sample_mean={grounded_stats['mean']:.4f}"
+        "[surfel-quality] centroid residuals to promoted cloud: "
+        f"ascended_mean={asc_centroid_stats['mean']:.4f} "
+        f"plateau_mean={plateau_centroid_stats['mean']:.4f} "
+        f"grounded_sample_mean={grounded_centroid_stats['mean']:.4f}"
     )
     print(
         "[surfel-quality] counts: "

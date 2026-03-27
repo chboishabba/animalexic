@@ -59,3 +59,7 @@
   - `scripts/promoted_depth_to_surfel.py` projects promoted depth into surfels and emits NPZ/PLY artifacts for inspection
 - Fixed the surfel projection CLI (duplicate arg definitions) and aligned weight/residual sampling to promoted pixels. First rerun on the lossless expand-24 segment (`surfel_expand24_beta035_gamma020_v2`, stride 8) produced 5 ascended surfels (plateau 735, grounded 1754).
 - Added `scripts/surfel_quality.py` to verify surfel states against the promoted point cloud. The first validation run (`outputs/surfel_quality_beta035_gamma020_v2`) showed ascended surfels are not yet tighter than plateau (`0.0238` mean residual vs `0.0010`), so the surfel frontier is still guard/support correctness rather than densification.
+- Reworked surfel state/verification to expose the real merge defect:
+  - `scripts/surfel_guard.py` now keeps a surface anchor (`pos`) plus a merged centroid and support-spread statistic instead of letting the public surfel position drift silently off-surface
+  - `scripts/surfel_quality.py` now reports centroid residuals and support spread in addition to anchor residuals
+  - with the corrected representation, the best recovered ascended core (`outputs/surfel_expand24_beta035_gamma020_v6`, `tau_a=0.2`) is 1 surfel and still worse than plateau on centroid residual (`0.0178` vs `0.0000`), so the next surfel work is merge-geometry correction, not threshold sweeping
