@@ -59,9 +59,25 @@ def accumulate_frame_into_surfels(
     weights: np.ndarray,
     residuals: np.ndarray,
     params: SurfelGuardParams,
-) -> None:
+) -> dict[str, float]:
     if len(points_xyz) == 0:
-        return
+        return {
+            "points": 0.0,
+            "new_surfels": 0.0,
+            "merged_surfels": 0.0,
+            "merge_accept_rate": 0.0,
+            "mean_merge_dist": 0.0,
+            "mean_input_residual": 0.0,
+        }
+    stats = {
+        "points": float(len(points_xyz)),
+        "new_surfels": 0.0,
+        "merged_surfels": 0.0,
+        "merge_accept_rate": 0.0,
+        "mean_merge_dist": 0.0,
+        "mean_input_residual": float(np.mean(residuals)) if len(residuals) else 0.0,
+    }
+    merge_dists: list[float] = []
     for pos, w, residual in zip(points_xyz, weights, residuals):
         if w <= 0:
             continue
@@ -109,12 +125,14 @@ def accumulate_frame_into_surfels(
                 }
             )
             grid.setdefault(key, []).append(idx)
+            stats["new_surfels"] += 1.0
         else:
             s = surfels[best_idx]
             total_w = s["weight"] + contrib
             if total_w <= 1e-6:
                 continue
             merge_dist = float(np.linalg.norm(pos - s["pos"]))
+            merge_dists.append(merge_dist)
             s["centroid"] = (s["centroid"] * s["weight"] + pos * contrib) / total_w
             s["normal"] = s["normal"] * s["weight"] + n * contrib
             n_norm = float(np.linalg.norm(s["normal"]))
@@ -135,7 +153,13 @@ def accumulate_frame_into_surfels(
                 float(params.alpha) * s["residual_ema"] + (1.0 - float(params.alpha)) * float(residual)
             )
             s["support_spread"] = max(float(s["support_spread"]), merge_dist)
-
+            stats["merged_surfels"] += 1.0
+    accepted = stats["new_surfels"] + stats["merged_surfels"]
+    if accepted > 0.0:
+        stats["merge_accept_rate"] = stats["merged_surfels"] / accepted
+    if merge_dists:
+        stats["mean_merge_dist"] = float(np.mean(merge_dists))
+    return stats
 
 def accumulate_candidate_surfels(
     frame_points: Iterable[np.ndarray],

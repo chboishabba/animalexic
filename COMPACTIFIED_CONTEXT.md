@@ -267,6 +267,10 @@
       - `scripts/promoted_depth_to_surfel.py --save-snapshots` writes compact per-frame surfel-state snapshots
       - `scripts/render_surfel_replay_webm.py` renders those snapshots into a time-evolving `.webm`
       - current artifact for the preferred baseline: `outputs/surfel_replay_baseline/surfel_replay.webm`
+    - surfel accumulation now also supports measured ingest stopping:
+      - `scripts/promoted_depth_to_surfel.py` writes per-frame gain/quality stats to `surfels_frame_stats.json`
+      - optional controls: `--early-stop-window`, `--min-frames-before-stop`, `--min-ascended-before-stop`, `--min-new-ascended`, `--min-residual-improvement`, `--max-scene-change`
+      - on the current preferred 24-frame lossless clip, the guarded stop rule does not fire once warmup/support gates are applied; useful structure is still being added through frame `23`
 - Repo-state recovery on 2026-03-26:
   - `spec.md`, `architecture.md`, and `devlog.md` were missing and have now been restored
   - `TODO.md` now tracks unfinished work only; completed oracle/auto-res/startup-visibility work was removed from the outstanding list

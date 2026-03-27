@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from statistics import mean
 
 import cv2
 import numpy as np
@@ -15,7 +16,6 @@ from surfel_guard import (
     SURFEL_GROUNDED,
     SURFEL_PLATEAU,
     SurfelGuardParams,
-    accumulate_candidate_surfels,
     accumulate_frame_into_surfels,
     guard_surfels,
     init_surfel_store,
@@ -152,6 +152,12 @@ def main() -> None:
     ap.add_argument("--save-snapshots", action="store_true")
     ap.add_argument("--snapshots-dir", type=Path)
     ap.add_argument("--save-ply", action="store_true")
+    ap.add_argument("--early-stop-window", type=int, default=0, help="Stop after this many low-gain frames; 0 disables")
+    ap.add_argument("--min-frames-before-stop", type=int, default=12, help="Do not apply early-stop logic before this many frames")
+    ap.add_argument("--min-ascended-before-stop", type=int, default=20, help="Do not apply early-stop logic until this many ascended surfels exist")
+    ap.add_argument("--min-new-ascended", type=int, default=1, help="Minimum new ascended surfels expected in the stop window")
+    ap.add_argument("--min-residual-improvement", type=float, default=0.0005, help="Minimum residual improvement expected in the stop window")
+    ap.add_argument("--max-scene-change", type=float, default=0.85, help="Stop if average scene-change score exceeds this in the stop window")
     args = ap.parse_args()
 
     artifact = load_calibration_artifact(args.calibration)
@@ -244,14 +250,88 @@ def main() -> None:
     snapshots_dir = args.snapshots_dir or (args.output_dir / "surfels_snapshots")
     if args.save_snapshots:
         snapshots_dir.mkdir(parents=True, exist_ok=True)
-        surfels, grid = init_surfel_store()
-        for frame_idx, (points_xyz, weights, residuals) in enumerate(zip(frame_points, frame_weights, frame_residuals)):
-            accumulate_frame_into_surfels(surfels, grid, frame_idx, points_xyz, weights, residuals, params)
-            states = guard_surfels(surfels, params)
-            save_surfel_state(snapshots_dir / f"surfels_state_f{frame_idx:04d}.npz", surfels, states)
-    else:
-        surfels = accumulate_candidate_surfels(frame_points, frame_weights, frame_residuals, params)
+
+    surfels, grid = init_surfel_store()
+    frame_stats: list[dict[str, float | int | bool]] = []
+    prev_ascended = 0
+    prev_ascended_mean_residual: float | None = None
+    stopped_early = False
+    stop_reason = ""
+    processed_frame_indices: list[int] = []
+
+    for frame_idx, points_xyz, weights, residuals in zip(frame_indices, frame_points, frame_weights, frame_residuals):
+        acc_stats = accumulate_frame_into_surfels(surfels, grid, frame_idx, points_xyz, weights, residuals, params)
         states = guard_surfels(surfels, params)
+        state_arr = np.array(states, dtype=np.uint8)
+        asc_mask = state_arr == SURFEL_ASCENDED
+        plat_mask = state_arr == SURFEL_PLATEAU
+        ascended_count = int(np.count_nonzero(asc_mask))
+        plateau_count = int(np.count_nonzero(plat_mask))
+        grounded_count = int(np.count_nonzero(state_arr == SURFEL_GROUNDED))
+        new_ascended = ascended_count - prev_ascended
+        ascended_residuals = [float(surfels[idx]["residual_ema"]) for idx, st in enumerate(states) if st == SURFEL_ASCENDED]
+        ascended_mean_residual = float(mean(ascended_residuals)) if ascended_residuals else None
+        residual_improvement = 0.0
+        if prev_ascended_mean_residual is not None and ascended_mean_residual is not None:
+            residual_improvement = prev_ascended_mean_residual - ascended_mean_residual
+        scene_change_score = 1.0 - float(acc_stats["merge_accept_rate"])
+        if float(acc_stats["mean_merge_dist"]) > 0.0 and float(params.pos_eps) > 1e-6:
+            scene_change_score = min(
+                1.0,
+                max(
+                    scene_change_score,
+                    float(acc_stats["mean_merge_dist"]) / float(params.pos_eps),
+                ),
+            )
+
+        frame_row = {
+            "frame_idx": int(frame_idx),
+            "points": int(acc_stats["points"]),
+            "new_surfels": int(acc_stats["new_surfels"]),
+            "merged_surfels": int(acc_stats["merged_surfels"]),
+            "merge_accept_rate": float(acc_stats["merge_accept_rate"]),
+            "mean_merge_dist": float(acc_stats["mean_merge_dist"]),
+            "mean_input_residual": float(acc_stats["mean_input_residual"]),
+            "grounded": grounded_count,
+            "plateau": plateau_count,
+            "ascended": ascended_count,
+            "new_ascended": int(new_ascended),
+            "ascended_mean_residual": ascended_mean_residual,
+            "residual_improvement": float(residual_improvement),
+            "scene_change_score": float(scene_change_score),
+            "stop_candidate": False,
+        }
+        frame_stats.append(frame_row)
+        processed_frame_indices.append(int(frame_idx))
+
+        if args.save_snapshots:
+            save_surfel_state(snapshots_dir / f"surfels_state_f{frame_idx:04d}.npz", surfels, states)
+
+        if ascended_mean_residual is not None:
+            prev_ascended_mean_residual = ascended_mean_residual
+        prev_ascended = ascended_count
+
+        if (
+            args.early_stop_window > 0
+            and len(frame_stats) >= max(int(args.early_stop_window), int(args.min_frames_before_stop))
+            and ascended_count >= int(args.min_ascended_before_stop)
+        ):
+            window = frame_stats[-int(args.early_stop_window):]
+            avg_new_asc = float(mean(float(r["new_ascended"]) for r in window))
+            avg_improvement = float(mean(float(r["residual_improvement"]) for r in window))
+            avg_scene_change = float(mean(float(r["scene_change_score"]) for r in window))
+            low_gain = avg_new_asc < float(args.min_new_ascended) and avg_improvement < float(args.min_residual_improvement)
+            scene_break = avg_scene_change > float(args.max_scene_change)
+            if low_gain:
+                frame_row["stop_candidate"] = True
+                stopped_early = True
+                stop_reason = (
+                    f"low_gain(avg_new_asc={avg_new_asc:.3f}, avg_improvement={avg_improvement:.5f}, "
+                    f"avg_scene_change={avg_scene_change:.3f}, scene_break={scene_break})"
+                )
+                break
+
+    states = guard_surfels(surfels, params)
 
     asc_mask = np.array([s == SURFEL_ASCENDED for s in states], dtype=np.uint8)
     plat_mask = np.array([s == SURFEL_PLATEAU for s in states], dtype=np.uint8)
@@ -262,7 +342,19 @@ def main() -> None:
     summary = {
         "runtime_dir": str(args.runtime_dir),
         "calibration_id": artifact.calibration_id,
-        "frames": len(frame_indices),
+        "frames": len(processed_frame_indices),
+        "frame_indices": processed_frame_indices,
+        "early_stop": {
+            "enabled": bool(args.early_stop_window > 0),
+            "stopped": stopped_early,
+            "reason": stop_reason,
+            "window": int(args.early_stop_window),
+            "min_frames_before_stop": int(args.min_frames_before_stop),
+            "min_ascended_before_stop": int(args.min_ascended_before_stop),
+            "min_new_ascended": int(args.min_new_ascended),
+            "min_residual_improvement": float(args.min_residual_improvement),
+            "max_scene_change": float(args.max_scene_change),
+        },
         "counts": {
             "grounded": int(np.count_nonzero(np.array(states) == SURFEL_GROUNDED)),
             "plateau": int(np.count_nonzero(plat_mask)),
@@ -270,6 +362,7 @@ def main() -> None:
         },
     }
     (args.output_dir / "surfels_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (args.output_dir / "surfels_frame_stats.json").write_text(json.dumps(frame_stats, indent=2), encoding="utf-8")
     if args.save_snapshots:
         summary["snapshots_dir"] = str(snapshots_dir)
         (args.output_dir / "surfels_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -293,6 +386,15 @@ def main() -> None:
     print(
         f"[surfel] counts: grounded={summary['counts']['grounded']} plateau={summary['counts']['plateau']} ascended={summary['counts']['ascended']}"
     )
+    if frame_stats:
+        last = frame_stats[-1]
+        print(
+            "[surfel] last-frame stats: "
+            f"frame={last['frame_idx']} new_ascended={last['new_ascended']} "
+            f"merge_accept={last['merge_accept_rate']:.3f} scene_change={last['scene_change_score']:.3f}"
+        )
+    if stopped_early:
+        print(f"[surfel] early stop: {stop_reason}")
     if args.save_snapshots:
         print(f"[surfel] wrote snapshots: {snapshots_dir}")
 

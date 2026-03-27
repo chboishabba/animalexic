@@ -44,6 +44,8 @@
   - `beta` sweep from the `tau_a=0.02` baseline is also complete; the current preferred operating point is `beta=1.00`, which yields `103` ascended surfels with centroid residual `0.0124` versus `0.0265` for the non-promoted multi-frame set
   - `gamma_neighbor` sweep from the `tau_a=0.02`, `beta=1.00` baseline is also complete; the current preferred operating point is `gamma_neighbor=1.50`, which yields `157` ascended surfels with centroid residual `0.0144` versus `0.0283` for the non-promoted multi-frame set
   - merge-radius sweep from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50` baseline is also complete; tightening to `pos_eps=0.15` yields `165` ascended surfels with centroid residual `0.0140` versus `0.0236` for the non-promoted multi-frame set
+- Early-stop instrumentation is now in place on the surfel path. Use `surfels_frame_stats.json` plus the new CLI stop controls to decide ingest length from measured marginal gain instead of a fixed frame cap.
+- On the current 24-frame lossless segment, the stop rule does not trigger once warmup/support gates are applied; that means the clip is still adding useful structure through the end, so the next extension should be a longer same-object segment rather than a shorter cutoff.
   - next knob should be a depth-consistency gate or another merge-geometry refinement from the `tau_a=0.02`, `beta=1.00`, `gamma_neighbor=1.50`, `pos_eps=0.15` baseline
   - keep cross-frame-only merging and the multi-frame verifier comparison fixed
   - reject any run where ascended centroid residual stops beating the non-promoted multi-frame set

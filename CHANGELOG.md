@@ -91,3 +91,7 @@
 - Rendered the current best surfel baseline to `outputs/surfel_poseps_015_baseline/surfel_cloud.webm` so the densified spatial state can be inspected without a separate point-cloud viewer.
 - Added incremental snapshot export to `scripts/promoted_depth_to_surfel.py` via `--save-snapshots` and `scripts/render_surfel_replay_webm.py` to turn those snapshots into a true time-evolving replay.
 - Rendered the first 4D-style replay for the current preferred baseline to `outputs/surfel_replay_baseline/surfel_replay.webm`.
+- Added measured early-stop instrumentation to `scripts/promoted_depth_to_surfel.py`:
+  - per-frame stats now record `new_ascended`, `merge_accept_rate`, residual improvement, and a simple scene-change proxy in `surfels_frame_stats.json`
+  - optional stop controls were added: `--early-stop-window`, `--min-frames-before-stop`, `--min-ascended-before-stop`, `--min-new-ascended`, `--min-residual-improvement`, `--max-scene-change`
+  - on the current preferred 24-frame lossless clip, the guarded stop rule does **not** trigger early once warmup/support gates are enforced; the object is still adding useful structure through frame `23`
