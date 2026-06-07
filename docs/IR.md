@@ -70,3 +70,13 @@ For every Candidate or Promoted value:
 - SPIR-V layer only implements bounded local operators (above kernels).
 - Governance, promotion, and lattice transitions remain in the DASHI layer / runtime scheduler.
 - CPU fallback is allowed; IR remains the same.
+
+## External watchlist
+- Digital Human Atlas timeline — https://github.com/ethanbholland/digital-human-atlas/blob/main/TIMELINE.md. Check in periodically; it aggregates monthly releases in digital humans / 3D / 4D video that may supply datasets, baselines, or comparison targets.
+- Near-term pulls from the timeline to evaluate:
+  - FlashDepth (real-time 2K streaming depth) as a monocular depth latency/quality baseline.
+  - UFM: Unified dense correspondence to benchmark correspondence quality vs our ROI flow + stereo matcher.
+  - D4RT (fast 4D reconstruction/tracking) for dynamic-scene baselines alongside guarded voxel/surfel paths.
+  - Video Depth Propagation for temporal depth propagation comparison against our temporal merge.
+  - Marigold IID (depth + normals + albedo) as a static oracle/relighting reference.
+  - HumanOLAT dataset for full-body relighting / novel-view consistency tests of promoted canonical depth.

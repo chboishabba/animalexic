@@ -181,6 +181,8 @@ def main() -> None:
     ap.add_argument("--h-a", type=float, default=2.0)
     ap.add_argument("--epsilon-rho", type=float, default=64.0)
     ap.add_argument("--ray-decay", type=float, default=0.35)
+
+    ap.add_argument("--gamma-neighbor", dest="gamma_neighbor", type=float, default=0.20)
     ap.add_argument("--save-ply", action="store_true")
     args = ap.parse_args()
 
@@ -284,6 +286,7 @@ def main() -> None:
     all_points = np.concatenate(frame_points, axis=0)
     grid_spec = build_grid_spec(all_points, voxel_size=float(args.voxel_size))
     params = VoxelGuardParams(
+        gamma_neighbor=float(args.gamma_neighbor),
         alpha=float(args.alpha),
         alpha_h=float(args.alpha_h),
         beta=float(args.persistence_beta),

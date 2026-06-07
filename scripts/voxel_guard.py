@@ -26,6 +26,7 @@ class VoxelGuardParams:
     epsilon_rho: float = 64.0
     ray_decay: float = 0.35
     sigma_rho: float = 24.0
+    gamma_neighbor: float = 0.20
 
 
 @dataclass
@@ -202,7 +203,19 @@ def accumulate_candidate_voxels(
         residual_den = float(params.alpha) * residual_den + frame_residual_den
 
     mean_evidence = evidence / np.maximum(temporal_hits, 1.0)
+    mask = evidence > 0.0
+    neighbor = (
+        mask.astype(np.float32)
+        + np.roll(mask, 1, axis=0)
+        + np.roll(mask, -1, axis=0)
+        + np.roll(mask, 1, axis=1)
+        + np.roll(mask, -1, axis=1)
+        + np.roll(mask, 1, axis=2)
+        + np.roll(mask, -1, axis=2)
+    )
+    neighbor_norm = np.clip(neighbor / 6.0, 0.0, 1.0)
     score = mean_evidence * (1.0 + float(params.beta) * np.minimum(temporal_hits, float(params.h_max)))
+    score *= (1.0 + float(params.gamma_neighbor) * neighbor_norm)
     residual = np.zeros_like(score, dtype=np.float32)
     valid_residual = residual_den > 1e-6
     residual[valid_residual] = residual_num[valid_residual] / residual_den[valid_residual]

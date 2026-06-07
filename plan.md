@@ -8,6 +8,14 @@ Build a GPU-first stereo → 3D pipeline that can run live at 4K60 for a fixed s
 - Two regimes identified:
   - Regime A — fixed stereo rig: calibrate/rectify once, extrinsics are persistent state, per-frame depth/disparity with delta-only processing.
   - Regime B — opportunistic multi-view (phones): time + viewpoint alignment, pose recovery, fusion, handling rolling shutter/lens differences; throughput secondary to robustness.
+- External reference to revisit periodically: Digital Human Atlas timeline — https://github.com/ethanbholland/digital-human-atlas/blob/main/TIMELINE.md (actively tracks monthly avatar/3D/4D video releases; potential source of datasets/baselines/papers).
+- 2026/2025 candidates to mine soon:
+  - FlashDepth (real-time 2K streaming depth) as a monocular baseline for latency/quality comparison.
+  - UFM: Unified dense correspondence (flow/correspondence) to test against our delta-ROI optical flow + stereo matching.
+  - D4RT (fast 4D reconstruction/tracking) as a dynamic-scene baseline aligned with our guarded voxel/surfel path.
+  - Video Depth Propagation (temporal depth propagation) for oracle/temporal merge comparison.
+  - Marigold IID (open-depth/normals/albedo) for static oracle/relighting checks.
+  - HumanOLAT dataset (full-body relighting/novel-view) as a test set for canonical depth/lighting consistency.
 
 ## Success criteria
 - Regime A: sustained ≥60 fps at 4K per eye on target GPU; depth quality visually stable; latency <50 ms end-to-end.
