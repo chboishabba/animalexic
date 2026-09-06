@@ -1,6 +1,6 @@
 # Drosophila connectome / functional-imaging x-pollination
 
-Animalexic's runtime remains a governed embodied-observation system.  The Drosophila work in `dashi_agda` and `dashiBRAIN` supplies a particularly strong biological instantiation of the same observation/promotion architecture.
+Animalexic's runtime remains a governed embodied-observation system. The Drosophila work in `dashi_agda` and `dashiBRAIN` supplies a particularly strong biological instantiation of the same observation/promotion architecture.
 
 ## Scientific source attribution rule
 
@@ -55,7 +55,7 @@ substrate -> candidate -> promoted
                     \-> reject
 ```
 
-A fast connectome kernel, calcium analysis, pose estimator or behaviour classifier may propose a candidate.  It may not directly mutate canonical state.
+A fast connectome kernel, calcium analysis, pose estimator or behaviour classifier may propose a candidate. It may not directly mutate canonical state.
 
 Promotion should be conditioned on explicit receipts for:
 
@@ -65,27 +65,48 @@ Promotion should be conditioned on explicit receipts for:
 - relevant cross-modal consistency;
 - experiment/predictor commit and output hash.
 
-## Multimodal does not mean independent
+## Same-trial provenance dependence
 
-Optical calcium and behavioural motion observed from the same animal are distinct modalities but share upstream provenance.  They should therefore be useful jointly without being counted as independent evidence merely because their modality labels differ.
+Multiple modalities can corroborate one another without constituting independent replication. Every observation should retain upstream roots such as:
+
+- animal / subject;
+- trial;
+- acquisition session;
+- registration artifact;
+- preprocessing pipeline;
+- predictor/model version;
+- dataset release.
+
+Thus optical calcium and behavioural motion observed from the same animal are distinct modalities but share upstream provenance:
 
 ```text
-same-fly acquisition
+same-fly trial
    |-- calcium trace
    `-- motion trace
 ```
 
-The shared root must remain explicit in the provenance graph.
+They are useful jointly, but they are not independent replication. Likewise, downstream metrics produced from the same registration or preprocessing root cannot silently be counted as two independent experiments. Missing provenance is uncertainty, not evidence of independence.
 
-## Behavioural motifs
+The runtime bridge in `scripts/same_trial_provenance.py` therefore computes shared upstream roots explicitly before an independence claim is allowed.
 
-Animalexic's existing behavioural-syllable rule transfers directly:
+## Consumer-indexed evidence
+
+Evidence sufficiency is purpose-relative. A connectome + registered calcium result may close a structure/function benchmark while remaining insufficient for body state, behavioural interpretation, or communication.
+
+The runtime policy in `scripts/consumer_evidence_policy.py` uses separate consumers:
+
+- structure/function;
+- body state;
+- behaviour;
+- communication.
+
+Cross-consumer transfer requires its own receipt. In particular:
 
 ```text
-recurrent pose/motion motif != semantic meaning
+neural promotion != effector promotion != behavioural meaning != communicative meaning
 ```
 
-A Drosophila turning, gait, grooming, wing or proboscis motif can be a reproducible dynamical object without already being named as an intention or communicative act.
+A recurrent behavioural motif may be a useful reduced-order coordinate without being a semantic label.
 
 ## Closed-loop biological target
 
@@ -102,7 +123,7 @@ stimulus
   -> sensory return
 ```
 
-Animalexic supplies the observation, promotion, abstention, provenance and defeasible semantic layers around that chain.  Drosophila supplies unusually rich structural and functional producers for the chain itself.
+Animalexic supplies the observation, promotion, abstention, provenance and defeasible semantic layers around that chain. Drosophila supplies unusually rich structural and functional producers for the chain itself.
 
 ## Non-promotion boundaries
 
@@ -113,4 +134,5 @@ behavioural motif != communicative act
 communicative act != semantic meaning
 single modality != multimodal confirmation
 multiple modalities != independent evidence when upstream provenance is shared
+consumer-specific promotion != promotion for every downstream consumer
 ```
