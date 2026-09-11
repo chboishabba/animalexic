@@ -47,3 +47,7 @@ python scripts/gauthey_functional_trajectory_adapter.py \
 ```
 
 The standing firewalls are: selected ROI row != MaleCNS neuron; PCA coordinate != anatomical coordinate; visual recurrence != same neuron population; functional activation != causal necessity; published dataset != Animalexic promotion receipt.
+
+### Source-free smoke check
+
+`python scripts/state_space_real_adapter_smoke.py` checks the Arese UMAP-column discovery, governed decision vocabulary, and fail-closed Gauthey 940x668 shape gate without downloading or fabricating either scientific dataset.
