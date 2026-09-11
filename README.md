@@ -50,4 +50,4 @@ The standing firewalls are: selected ROI row != MaleCNS neuron; PCA coordinate !
 
 ### Source-free smoke check
 
-`python scripts/state_space_real_adapter_smoke.py` checks the Arese UMAP-column discovery, governed decision vocabulary, and fail-closed Gauthey 940x668 shape gate without downloading or fabricating either scientific dataset.
+`python scripts/state_space_real_adapter_smoke.py` checks the Arese UMAP-column discovery and candidate-only import boundary, the governed decision vocabulary, and the fail-closed Gauthey 940x668 shape gate without downloading or fabricating either scientific dataset.
