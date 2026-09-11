@@ -12,7 +12,7 @@ This provides a runtime ABI for DASHI's birdsong/fly state-space visualisation w
 
 ### Real published birdsong producer
 
-`scripts/arese_shared_manifold_adapter.py` imports the processed CSV outputs associated with Lucio Arese, *Shared acoustic manifolds for exploratory comparison of passerine vocalizations* (DOI `10.32942/X2W65N`; data DOI `10.5281/zenodo.18332166`). The adapter preserves exact source-file SHA-256 and row-level provenance, discovers common UMAP coordinate-column spellings fail-closed, and emits the same governed trajectory ABI.
+`scripts/arese_shared_manifold_adapter.py` imports the processed CSV outputs associated with Lucio Arese, *Shared acoustic manifolds for exploratory comparison of passerine vocalizations* (EcoEvoRxiv preprint v4; DOI `10.32942/X2W65N`; data DOI `10.5281/zenodo.18332166`). The adapter preserves exact source-file SHA-256 and row-level provenance, discovers common UMAP coordinate-column spellings fail-closed, and emits the same governed trajectory ABI.
 
 The current v4 paper pipeline is recorded as source metadata rather than silently recomputed: 120-D MFCC (`40 + delta + delta-delta`) or 80-D chroma -> PCA-20 -> UMAP-3D, with `n_neighbors=30`, `min_dist=0.1`, seed `42`; MFCC uses Euclidean distance and chroma cosine. RMS, spectral centroid, and CEC are retained as visualization-overlay semantics, not embedding inputs.
 
