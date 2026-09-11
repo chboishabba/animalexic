@@ -6,6 +6,7 @@ from pathlib import Path
 from scripts.issue20_multiview import (
     MetadataError,
     accumulate_sparse_motion_voxels,
+    extract_motion_samples,
     group_synchronised_frames,
     load_issue20_metadata,
     pixel_ray_world,
@@ -68,6 +69,30 @@ class Issue20MetadataTests(unittest.TestCase):
         self.assertAlmostEqual(ray[0], 0.0, places=6)
         self.assertAlmostEqual(ray[1], 0.0, places=6)
         self.assertAlmostEqual(ray[2], 1.0, places=6)
+
+    def test_extract_motion_samples_uses_per_camera_frame_differences(self):
+        import cv2
+        import numpy as np
+
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        rows = []
+        for cam in (0, 1):
+            for frame in (0, 1):
+                name = f"cam{cam}_{frame:04d}.png"
+                image = np.zeros((8, 8), dtype=np.uint8)
+                if frame == 1:
+                    image[4, 4] = 255
+                cv2.imwrite(str(root / name), image)
+                rows.append(entry(cam, frame, (-1.0 if cam == 0 else 1.0, 0.0, 0.0), image=name))
+        path = root / "frame_metadata.json"
+        path.write_text(json.dumps(rows), encoding="utf-8")
+        obs = load_issue20_metadata(path)
+        samples = list(extract_motion_samples(obs, root, threshold=10.0, pixel_stride=1))
+        self.assertEqual({s["camera_id"] for s in samples}, {0, 1})
+        self.assertTrue(all(s["frame_index"] == 1 for s in samples))
+        self.assertTrue(any(s["u"] == 4 and s["v"] == 4 for s in samples))
 
     def test_sparse_motion_from_two_cameras_accumulates_shared_voxel(self):
         path = self.write_metadata([
