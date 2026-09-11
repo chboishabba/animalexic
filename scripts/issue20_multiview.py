@@ -172,6 +172,65 @@ def pixel_ray_world(
     return _normalize(world)
 
 
+def extract_motion_samples(
+    observations: Iterable[CameraObservation],
+    image_root: str | Path,
+    *,
+    threshold: float = 2.0,
+    pixel_stride: int = 1,
+) -> Iterable[dict[str, object]]:
+    """Yield sparse changed-pixel samples from consecutive frames per camera.
+
+    The image differencing matches the source project's producer boundary. It does
+    not perform object recognition and does not promote any spatial output.
+    """
+    if threshold < 0:
+        raise ValueError("threshold must be non-negative")
+    if pixel_stride < 1:
+        raise ValueError("pixel_stride must be at least one")
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError("extract_motion_samples requires OpenCV (cv2)") from exc
+
+    root = Path(image_root)
+    by_camera: dict[int, list[CameraObservation]] = defaultdict(list)
+    for obs in observations:
+        by_camera[obs.camera_id].append(obs)
+
+    for camera_id in sorted(by_camera):
+        frames = sorted(by_camera[camera_id], key=lambda o: o.frame_index)
+        for prev_obs, next_obs in zip(frames, frames[1:]):
+            prev = cv2.imread(str(root / prev_obs.image_file), cv2.IMREAD_GRAYSCALE)
+            nxt = cv2.imread(str(root / next_obs.image_file), cv2.IMREAD_GRAYSCALE)
+            if prev is None or nxt is None:
+                raise MetadataError(
+                    f"cannot load image pair for camera {camera_id}: "
+                    f"{prev_obs.image_file}, {next_obs.image_file}"
+                )
+            if prev.shape != nxt.shape:
+                raise MetadataError(
+                    f"image shape mismatch for camera {camera_id}: "
+                    f"{prev.shape} != {nxt.shape}"
+                )
+            diff = cv2.absdiff(prev, nxt)
+            height, width = diff.shape[:2]
+            for v in range(0, height, pixel_stride):
+                for u in range(0, width, pixel_stride):
+                    evidence = float(diff[v, u])
+                    if evidence > threshold:
+                        yield {
+                            "camera_id": camera_id,
+                            "frame_index": next_obs.frame_index,
+                            "u": u,
+                            "v": v,
+                            "width": width,
+                            "height": height,
+                            "evidence": evidence,
+                            "source_image": next_obs.image_file,
+                        }
+
+
 def accumulate_sparse_motion_voxels(
     *,
     cameras: Mapping[int, CameraObservation],
