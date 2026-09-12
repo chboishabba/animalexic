@@ -1,0 +1,77 @@
+name: Regime B validation
+
+on:
+  push:
+    branches:
+      - agent/issue20-known-pose-multiview
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  focused-regime-b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused dependencies
+        run: python -m pip install --upgrade pip numpy opencv-python-headless
+      - name: Compile Regime B modules
+        run: |
+          python -m py_compile \
+            scripts/camera_pose_fibre.py \
+            scripts/cross_camera_world_weld.py \
+            scripts/issue20_multiview.py \
+            scripts/issue20_pose_recovery.py \
+            scripts/visual_inertial_pose.py \
+            scripts/voxel_guard.py \
+            scripts/static_anchor_association.py \
+            scripts/static_anchor_candidates.py \
+            scripts/shared_world_guard_transport.py \
+            scripts/pose_guard_sensitivity.py \
+            scripts/pose_guard_sensitivity_experiment.py \
+            scripts/vio_calibration_candidates.py \
+            scripts/accel_bias_candidate.py \
+            scripts/translation_pose_graph.py \
+            scripts/rotation_pose_graph.py \
+            scripts/pose_graph_trajectory_adapter.py \
+            scripts/linear_visual_inertial_smoother.py \
+            scripts/rolling_shutter_pose_transport.py
+      - name: Run focused Regime B tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          for test in \
+            tests/test_camera_pose_fibre.py \
+            tests/test_cross_camera_world_weld.py \
+            tests/test_issue20_multiview.py \
+            tests/test_issue20_pose_recovery.py \
+            tests/test_visual_inertial_pose.py \
+            tests/test_visual_inertial_correction.py \
+            tests/test_voxel_guard_camera_origins.py \
+            tests/test_static_anchor_association.py \
+            tests/test_static_anchor_candidates.py \
+            tests/test_shared_world_guard_transport.py \
+            tests/test_pose_guard_sensitivity.py \
+            tests/test_pose_guard_portfolio.py \
+            tests/test_pose_guard_sensitivity_experiment.py \
+            tests/test_quality_targeted_pose_refinement.py \
+            tests/test_vio_clock_offset_candidate.py \
+            tests/test_vio_calibration_candidates.py \
+            tests/test_vio_calibration_payment.py \
+            tests/test_hand_eye_translation_candidate.py \
+            tests/test_accel_bias_candidate.py \
+            tests/test_translation_pose_graph.py \
+            tests/test_rotation_pose_graph.py \
+            tests/test_pose_graph_trajectory_adapter.py \
+            tests/test_linear_visual_inertial_smoother.py \
+            tests/test_rolling_shutter_pose_transport.py \
+            tests/test_rolling_shutter_readout_candidate.py
+          do
+            echo "==> $test"
+            python "$test"
+          done

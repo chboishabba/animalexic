@@ -1,5 +1,73 @@
 # animalexic
 
-Experiments in human:animal communication, embodied observation, and governed multimodal inference.
+Experiments in human:animal communication, embodied observation, governed multimodal inference, and time-indexed multi-camera geometry.
 
-The current Drosophila cross-pollination reuses Animalexic's candidate/promote/abstain/reject semantics for connectome, registered functional imaging, effector/body state, behavioural motifs, same-trial provenance dependence, and consumer-indexed evidence promotion.
+Animalexic uses candidate/promote/abstain/reject semantics across observation layers. The current Drosophila cross-pollination applies the same governance to connectome, registered functional imaging, effector/body state, behavioural motifs, same-trial provenance dependence, and consumer-indexed evidence promotion.
+
+## Stereo and multi-camera geometry
+
+The geometry runtime has two related regimes:
+
+- **Regime A — fixed/SBS stereo:** calibration/rectification -> motion-gated disparity -> governed depth -> voxel/surfel accumulation.
+- **Regime B — opportunistic multi-view / handheld:** per-camera visual-inertial trajectory -> cross-camera world-frame weld -> time alignment -> governed multi-view geometry.
+
+The controlled bridge from A to B is the four-camera Pixeltovoxelprojector Issue #20 dataset. `scripts/issue20_multiview.py` consumes known camera poses and emits candidate cross-camera voxel evidence without bypassing governance.
+
+For handheld cameras, `scripts/camera_pose_fibre.py` treats camera pose as a **time-indexed candidate fibre**, not a one-off constant. Static-scene visual tracks may support pose; moving animal pixels are excluded by default from pose evidence. IMU measurements are priors rather than authoritative camera pose. Metric scale, clock alignment, and rolling-shutter uncertainty remain explicit debt until paid.
+
+The controlled bridge from exact poses to learned poses is executable:
+
+- `perturb_camera_observation(...)` creates an explicit synthetic pose perturbation while retaining the source observation as ground truth.
+- `recover_relative_pose_from_correspondences(...)` recovers calibrated two-view rotation and translation direction from static correspondences while leaving metric scale unpaid unless a named baseline is supplied.
+- `materialise_recovered_camera_observation(...)` admits only metric-paid recovered poses into the same `CameraObservation` / ray-projection contract used by the known-pose Issue-20 producer.
+- `scripts/issue20_pose_recovery.py` adds the image-facing layer: SIFT matching over pose-admissible static regions, calibrated pair recovery, conversion of known metadata into validation geometry, and post-hoc rotation/translation-direction scoring. Known poses are an oracle only and are not fed into the recovery solve.
+
+The handheld lane has both an inertial predictor and a bounded visual correction path in `scripts/visual_inertial_pose.py`:
+
+- `preintegrate_imu_prior(...)` integrates timestamped gyro/specific-force measurements into candidate rotation/velocity/position deltas.
+- `correct_visual_inertial_segment(...)` converts the inertial increment through a supplied camera<-IMU rigid transform, checks it against a static-scene visual relative pose, applies visual rotation only when the residual gate passes, applies visual metric translation only when scale is explicitly paid, and returns `abstain` on incompatible observations.
+- `compose_candidate_trajectory(...)` accumulates accepted corrected intervals into time-indexed local camera keyframes using deterministic SE(3) transport.
+
+Cross-camera alignment has its own producer in `scripts/cross_camera_world_weld.py`:
+
+- `estimate_world_weld(...)` estimates an `SE(3)` weld from shared static 3D anchors when metric scale is already paid, or an explicit `Sim(3)` weld when scale must remain a coordinate.
+- geometrically degenerate/collinear anchor sets fail closed;
+- `apply_world_weld_to_trajectory(...)` transports candidate local keyframes into the target shared world without changing their candidate status.
+
+The first robust anchor-governance layer is now `scripts/static_anchor_association.py`:
+
+- cross-camera association requires an explicit matching `anchor_id`; descriptor resemblance is not promoted into same-object identity;
+- only static, confidence-gated observations inside an explicit time window are admissible;
+- repeated observations choose the closest admissible timestamp pair while retaining source and target provenance;
+- `robust_estimate_world_weld(...)` deterministically enumerates minimal 3-anchor hypotheses, thresholds metric residuals, refits the best consensus, and retains both inlier and outlier anchor identities;
+- both rigid `SE(3)` and explicit-scale `Sim(3)` weld modes reuse the existing candidate world-weld carrier.
+
+The existing voxel guard now accepts an optional per-point world-frame camera-origin fibre via `frame_camera_origins`. Fixed/SBS callers can omit it and retain the historical zero-origin behaviour; multicamera callers can supply one `(N,3)` origin array per frame so DDA rays originate from the actual welded camera centres. The evidence equations, residual weighting, temporal accumulation, and guard thresholds are unchanged.
+
+This is **not yet promoted/full VIO or field-ready multicam fusion**. The correction path consumes supplied camera/IMU extrinsic and clock-alignment receipts; it does not yet estimate those quantities online. Anchor association currently consumes upstream same-object IDs rather than discovering them from descriptors. Online bias estimation, multi-keyframe optimization, loop closure, rolling-shutter correction, real-phone validation, and downstream shared-world voxel/surfel quality validation remain unpaid.
+
+This is **consumer-contract parity, not evidence parity**: known metadata and image-recovered pose may feed the same downstream ray/voxel/surfel machinery once metric scale is paid, but their provenance, uncertainty, validation status, and remaining debt stay distinct.
+
+The Regime-B ladder is now:
+
+```text
+known-pose multicam                         [implemented]
+  -> controlled perturbed known pose       [implemented]
+  -> image-recovered relative pose         [implemented; rendered-image validation]
+  -> Issue-20 image-pair recovery operator [implemented; archive execution blocked on binary acquisition]
+  -> IMU preintegration prior              [implemented]
+  -> bounded visual-inertial correction    [implemented; synthetic validation]
+  -> candidate local camera trajectory     [implemented; deterministic composition]
+  -> rigid/similarity cross-camera weld    [implemented; synthetic validation]
+  -> explicit static-anchor association    [implemented]
+  -> robust weld outlier consensus/refit   [implemented]
+  -> per-ray world camera-origin handoff   [implemented]
+  -> descriptor/track identity discovery   [unpaid]
+  -> online extrinsic/clock/bias estimation[unpaid]
+  -> multi-keyframe optimized VIO          [unpaid]
+  -> shared-world voxel/surfel validation  [unpaid]
+  -> rolling-shutter refinement            [unpaid]
+  -> fully handheld multicam fusion        [unpaid]
+```
+
+Pose adequacy is consumer-indexed: a pose can be sufficient for coarse ray/voxel intersection while still being insufficient for fine surfel fusion or body-pose reconstruction. See `plan.md`, `docs/IR.md`, and `docs/regime_b_roadmap.md` for the live geometry/promotion boundary and next residuals.

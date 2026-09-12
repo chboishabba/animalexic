@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import repeat
 from pathlib import Path
 from typing import Iterable
 
@@ -149,19 +150,29 @@ def accumulate_candidate_voxels(
     frame_residuals: Iterable[np.ndarray],
     params: VoxelGuardParams,
     frame_origin_factors: Iterable[np.ndarray] | None = None,
+    frame_camera_origins: Iterable[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Accumulate ray evidence using optional per-point camera origins.
+
+    ``frame_camera_origins`` contains one ``(N,3)`` array for each frame and
+    therefore preserves camera identity after multi-camera/world-frame welding.
+    Omitting it retains the historical zero-origin SBS behaviour exactly.
+    """
     evidence = np.zeros(grid_spec.dims, dtype=np.float32)
     temporal_hits = np.zeros(grid_spec.dims, dtype=np.float32)
     score = np.zeros(grid_spec.dims, dtype=np.float32)
     residual_num = np.zeros(grid_spec.dims, dtype=np.float32)
     residual_den = np.zeros(grid_spec.dims, dtype=np.float32)
-    camera_origin = np.zeros(3, dtype=np.float32)
 
-    if frame_origin_factors is None:
-        frame_origin_factors = (None for _ in frame_points)
+    origin_factor_iter = repeat(None) if frame_origin_factors is None else iter(frame_origin_factors)
+    camera_origin_iter = repeat(None) if frame_camera_origins is None else iter(frame_camera_origins)
 
-    for points_xyz, weights, residuals, origin_factors in zip(
-        frame_points, frame_weights, frame_residuals, frame_origin_factors
+    for points_xyz, weights, residuals, origin_factors, camera_origins in zip(
+        frame_points,
+        frame_weights,
+        frame_residuals,
+        origin_factor_iter,
+        camera_origin_iter,
     ):
         frame_evidence = np.zeros(grid_spec.dims, dtype=np.float32)
         frame_residual_num = np.zeros(grid_spec.dims, dtype=np.float32)
@@ -169,7 +180,17 @@ def accumulate_candidate_voxels(
         touched_this_frame: set[tuple[int, int, int]] = set()
         if origin_factors is None:
             origin_factors = np.ones((len(points_xyz),), dtype=np.float32)
-        for point_xyz, w, residual, origin_factor in zip(points_xyz, weights, residuals, origin_factors):
+        if camera_origins is None:
+            camera_origins = np.zeros((len(points_xyz), 3), dtype=np.float32)
+        else:
+            camera_origins = np.asarray(camera_origins, dtype=np.float32)
+            if camera_origins.shape != (len(points_xyz), 3):
+                raise ValueError("camera origins must have shape (N,3) matching frame points")
+            if not np.all(np.isfinite(camera_origins)):
+                raise ValueError("camera origins must be finite")
+        for point_xyz, w, residual, origin_factor, camera_origin in zip(
+            points_xyz, weights, residuals, origin_factors, camera_origins
+        ):
             voxels = dda_voxel_line(
                 camera_origin,
                 point_xyz,
