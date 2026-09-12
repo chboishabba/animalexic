@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
 
-from scripts.shared_world_guard_transport import GuardTransportComparison
+from scripts.shared_world_guard_transport import (
+    GuardFrameInputs,
+    GuardTransportComparison,
+    compare_guard_transport,
+)
+from scripts.voxel_guard import accumulate_candidate_voxels, guard_voxels
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,22 @@ class SensitivityCase:
         )
 
 
+@dataclass(frozen=True)
+class GuardRun:
+    evidence: np.ndarray
+    temporal_hits: np.ndarray
+    score: np.ndarray
+    residual: np.ndarray
+    states: np.ndarray
+
+
+@dataclass(frozen=True)
+class SensitivityRun:
+    case: SensitivityCase
+    comparison: GuardTransportComparison
+    guard_run: GuardRun
+
+
 def sensitivity_case_from_comparison(
     perturbation: GeometryFibrePerturbation,
     comparison: GuardTransportComparison,
@@ -93,3 +115,102 @@ def select_refinement_frontier(cases) -> list[SensitivityCase]:
             continue
         frontier.append(case)
     return frontier
+
+
+def _rotation_xyz_degrees(delta_deg_xyz) -> np.ndarray:
+    rx, ry, rz = [math.radians(float(x)) for x in delta_deg_xyz]
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
+    Rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]], dtype=np.float64)
+    Ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]], dtype=np.float64)
+    Rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]], dtype=np.float64)
+    return Rz @ Ry @ Rx
+
+
+def perturb_guard_frames(
+    frames,
+    perturbation: GeometryFibrePerturbation,
+) -> list[GuardFrameInputs]:
+    """Inject one controlled geometry-fibre defect into guard-frame inputs.
+
+    Endpoint rotation is performed about each original camera origin, then the
+    ray length is scaled explicitly. Camera-origin translation is applied as a
+    separate coordinate so downstream attribution can distinguish the fibres.
+    """
+    origin_delta = np.asarray(perturbation.origin_delta_m, dtype=np.float64)
+    if origin_delta.shape != (3,) or not np.all(np.isfinite(origin_delta)):
+        raise ValueError("origin_delta_m must be finite xyz")
+    scale = float(perturbation.scale_factor)
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("scale_factor must be positive and finite")
+    residual_delta = float(perturbation.residual_delta)
+    if not np.isfinite(residual_delta):
+        raise ValueError("residual_delta must be finite")
+    R = _rotation_xyz_degrees(perturbation.rotation_delta_deg_xyz)
+
+    out = []
+    for frame in frames:
+        points = np.asarray(frame.points, dtype=np.float64)
+        origins = np.asarray(frame.camera_origins, dtype=np.float64)
+        if points.shape != origins.shape or points.ndim != 2 or points.shape[1:] != (3,):
+            raise ValueError("frame points and camera_origins must be matching Nx3 arrays")
+        ray = points - origins
+        rotated_scaled_ray = scale * (R @ ray.T).T
+        candidate_origins = origins + origin_delta[None, :]
+        candidate_points = candidate_origins + rotated_scaled_ray
+        candidate_residuals = np.maximum(
+            0.0,
+            np.asarray(frame.residuals, dtype=np.float64) + residual_delta,
+        )
+        out.append(
+            GuardFrameInputs(
+                time_s=float(frame.time_s),
+                points=candidate_points.astype(np.float32),
+                camera_origins=candidate_origins.astype(np.float32),
+                weights=np.asarray(frame.weights, dtype=np.float32).copy(),
+                residuals=candidate_residuals.astype(np.float32),
+                origin_factors=np.asarray(frame.origin_factors, dtype=np.float32).copy(),
+            )
+        )
+    return out
+
+
+def execute_guard_frames(frames, grid_spec, params) -> GuardRun:
+    frames = list(frames)
+    evidence, temporal_hits, score, residual = accumulate_candidate_voxels(
+        grid_spec,
+        [frame.points for frame in frames],
+        [frame.weights for frame in frames],
+        [frame.residuals for frame in frames],
+        params,
+        frame_origin_factors=[frame.origin_factors for frame in frames],
+        frame_camera_origins=[frame.camera_origins for frame in frames],
+    )
+    states = guard_voxels(score, temporal_hits, residual, params)
+    return GuardRun(evidence, temporal_hits, score, residual, states)
+
+
+def run_guard_sensitivity_portfolio(
+    reference_frames,
+    perturbations,
+    grid_spec,
+    params,
+    policy: ConsumerQualityPolicy,
+) -> list[SensitivityRun]:
+    """Run controlled geometry defects through one unchanged voxel consumer."""
+    reference_frames = list(reference_frames)
+    oracle = execute_guard_frames(reference_frames, grid_spec, params)
+    runs = []
+    for perturbation in perturbations:
+        candidate_frames = perturb_guard_frames(reference_frames, perturbation)
+        candidate = execute_guard_frames(candidate_frames, grid_spec, params)
+        comparison = compare_guard_transport(
+            oracle.states,
+            candidate.states,
+            oracle.score,
+            candidate.score,
+        )
+        case = sensitivity_case_from_comparison(perturbation, comparison, policy)
+        runs.append(SensitivityRun(case, comparison, candidate))
+    return runs
