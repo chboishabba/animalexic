@@ -13,7 +13,7 @@ from scripts.camera_pose_fibre import (
     fuse_pose_candidates,
     pose_sufficient_for_consumer,
 )
-from scripts.issue20_multiview import pixel_ray_world
+from scripts.issue20_multiview import CameraObservation, pixel_ray_world
 
 
 class CameraPoseFibreTests(unittest.TestCase):
@@ -98,6 +98,36 @@ class CameraPoseFibreTests(unittest.TestCase):
         p1 = project(np.eye(3), np.zeros(3))
         p2 = project(R, t)
         return K, p1, p2, R, camera2_center
+
+    def test_controlled_pose_perturbation_keeps_ground_truth_identity(self):
+        self.assertTrue(
+            hasattr(pose_module, "perturb_camera_observation"),
+            "controlled pose-perturbation producer is not implemented yet",
+        )
+        camera = CameraObservation(
+            camera_id=3,
+            frame_index=11,
+            position=(1.0, 2.0, 3.0),
+            yaw_deg=10.0,
+            pitch_deg=2.0,
+            roll_deg=-3.0,
+            fov_deg=60.0,
+            image_file="cam3_0011.png",
+        )
+        perturbed = pose_module.perturb_camera_observation(
+            camera,
+            translation_delta=(0.25, -0.5, 0.75),
+            yaw_delta_deg=4.0,
+            pitch_delta_deg=-1.0,
+            roll_delta_deg=2.5,
+        )
+        self.assertEqual(perturbed.camera_id, camera.camera_id)
+        self.assertEqual(perturbed.frame_index, camera.frame_index)
+        self.assertEqual(perturbed.position, (1.25, 1.5, 3.75))
+        self.assertAlmostEqual(perturbed.yaw_deg, 14.0)
+        self.assertAlmostEqual(perturbed.pitch_deg, 1.0)
+        self.assertAlmostEqual(perturbed.roll_deg, -0.5)
+        self.assertEqual(perturbed.pose_source, "synthetic_perturbed_known_pose")
 
     def test_static_correspondences_recover_relative_pose_and_keep_scale_debt(self):
         self.assertTrue(
