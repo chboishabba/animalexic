@@ -42,7 +42,9 @@ The first robust anchor-governance layer is now `scripts/static_anchor_associati
 - `robust_estimate_world_weld(...)` deterministically enumerates minimal 3-anchor hypotheses, thresholds metric residuals, refits the best consensus, and retains both inlier and outlier anchor identities;
 - both rigid `SE(3)` and explicit-scale `Sim(3)` weld modes reuse the existing candidate world-weld carrier.
 
-This is **not yet promoted/full VIO or field-ready multicam fusion**. The correction path consumes supplied camera/IMU extrinsic and clock-alignment receipts; it does not yet estimate those quantities online. Anchor association currently consumes upstream same-object IDs rather than discovering them from descriptors. Online bias estimation, multi-keyframe optimization, loop closure, rolling-shutter correction, real-phone validation, and downstream shared-world voxel/surfel validation remain unpaid.
+The existing voxel guard now accepts an optional per-point world-frame camera-origin fibre via `frame_camera_origins`. Fixed/SBS callers can omit it and retain the historical zero-origin behaviour; multicamera callers can supply one `(N,3)` origin array per frame so DDA rays originate from the actual welded camera centres. The evidence equations, residual weighting, temporal accumulation, and guard thresholds are unchanged.
+
+This is **not yet promoted/full VIO or field-ready multicam fusion**. The correction path consumes supplied camera/IMU extrinsic and clock-alignment receipts; it does not yet estimate those quantities online. Anchor association currently consumes upstream same-object IDs rather than discovering them from descriptors. Online bias estimation, multi-keyframe optimization, loop closure, rolling-shutter correction, real-phone validation, and downstream shared-world voxel/surfel quality validation remain unpaid.
 
 This is **consumer-contract parity, not evidence parity**: known metadata and image-recovered pose may feed the same downstream ray/voxel/surfel machinery once metric scale is paid, but their provenance, uncertainty, validation status, and remaining debt stay distinct.
 
@@ -59,6 +61,7 @@ known-pose multicam                         [implemented]
   -> rigid/similarity cross-camera weld    [implemented; synthetic validation]
   -> explicit static-anchor association    [implemented]
   -> robust weld outlier consensus/refit   [implemented]
+  -> per-ray world camera-origin handoff   [implemented]
   -> descriptor/track identity discovery   [unpaid]
   -> online extrinsic/clock/bias estimation[unpaid]
   -> multi-keyframe optimized VIO          [unpaid]
@@ -67,4 +70,4 @@ known-pose multicam                         [implemented]
   -> fully handheld multicam fusion        [unpaid]
 ```
 
-Pose adequacy is consumer-indexed: a pose can be sufficient for coarse ray/voxel intersection while still being insufficient for fine surfel fusion or body-pose reconstruction. See `plan.md` and `docs/IR.md` for the existing `G_t` geometry state and promotion boundary.
+Pose adequacy is consumer-indexed: a pose can be sufficient for coarse ray/voxel intersection while still being insufficient for fine surfel fusion or body-pose reconstruction. See `plan.md`, `docs/IR.md`, and `docs/regime_b_roadmap.md` for the live geometry/promotion boundary and next residuals.
