@@ -23,9 +23,9 @@ class QualityTargetedPoseRefinementTests(unittest.TestCase):
             ("camera_origin", "orientation", "metric_scale", "observation_residual"),
         )
 
-    def test_quality_targeted_refinement_stops_when_consumer_policy_is_met(self):
+    def test_quality_targeted_refinement_reports_consumer_plateau(self):
         policy = ConsumerQualityPolicy(0.995, 0.98, 0.025)
-        history = quality_targeted_refinement(
+        result = quality_targeted_refinement(
             _reference_frames(),
             GeometryFibrePerturbation(
                 "yaw_10deg", rotation_delta_deg_xyz=(0.0, 0.0, 10.0)
@@ -35,12 +35,12 @@ class QualityTargetedPoseRefinementTests(unittest.TestCase):
             policy,
             max_steps=10,
         )
-        self.assertGreater(len(history), 1)
-        self.assertFalse(history[0].case.within_policy)
-        self.assertTrue(history[-1].case.within_policy)
-        self.assertLessEqual(len(history), 11)
+        self.assertGreater(len(result.history), 1)
+        self.assertFalse(result.history[0].case.within_policy)
+        self.assertFalse(result.history[-1].case.within_policy)
+        self.assertEqual(result.termination, "consumer_plateau")
         self.assertEqual(
-            active_perturbation_fibres(history[0].case.perturbation),
+            active_perturbation_fibres(result.history[0].case.perturbation),
             ("orientation",),
         )
 
