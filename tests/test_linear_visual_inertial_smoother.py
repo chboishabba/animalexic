@@ -13,8 +13,8 @@ class LinearVisualInertialSmootherTests(unittest.TestCase):
     def test_constant_velocity_chain_with_visual_loop(self):
         rotations = [np.eye(3), np.eye(3), np.eye(3)]
         inertial = [
-            InertialPVConstraint(0, 1, 1.0, (1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, "imu01"),
-            InertialPVConstraint(1, 2, 1.0, (1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, "imu12"),
+            InertialPVConstraint(0, 1, 1.0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, "imu01"),
+            InertialPVConstraint(1, 2, 1.0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, "imu12"),
         ]
         visual = [
             VisualTranslationConstraint(0, 2, (2.0, 0.0, 0.0), 2.0, "visual-loop")
@@ -37,7 +37,7 @@ class LinearVisualInertialSmootherTests(unittest.TestCase):
     def test_inconsistent_visual_constraint_abstains(self):
         rotations = [np.eye(3), np.eye(3)]
         inertial = [
-            InertialPVConstraint(0, 1, 1.0, (1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, "imu")
+            InertialPVConstraint(0, 1, 1.0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, "imu")
         ]
         visual = [
             VisualTranslationConstraint(0, 1, (4.0, 0.0, 0.0), 1.0, "bad-visual")
