@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/issue20-known-pose-multiview
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
