@@ -170,6 +170,38 @@ def pose_sufficient_for_consumer(
     return True
 
 
+def perturb_camera_observation(
+    camera,
+    *,
+    translation_delta: Sequence[float] = (0.0, 0.0, 0.0),
+    yaw_delta_deg: float = 0.0,
+    pitch_delta_deg: float = 0.0,
+    roll_delta_deg: float = 0.0,
+):
+    """Produce a controlled perturbation while preserving source identity.
+
+    The original observation remains the ground-truth carrier.  This returned
+    value is an experiment input for pose-recovery sensitivity sweeps and is
+    never a replacement for the source metadata.
+    """
+    from scripts.issue20_multiview import CameraObservation
+
+    delta = tuple(float(x) for x in translation_delta)
+    if len(delta) != 3:
+        raise ValueError("translation_delta must have exactly three coordinates")
+    return CameraObservation(
+        camera_id=int(camera.camera_id),
+        frame_index=int(camera.frame_index),
+        position=tuple(float(camera.position[i]) + delta[i] for i in range(3)),
+        yaw_deg=float(camera.yaw_deg) + float(yaw_delta_deg),
+        pitch_deg=float(camera.pitch_deg) + float(pitch_delta_deg),
+        roll_deg=float(camera.roll_deg) + float(roll_delta_deg),
+        fov_deg=float(camera.fov_deg),
+        image_file=str(camera.image_file),
+        pose_source="synthetic_perturbed_known_pose",
+    )
+
+
 def recover_relative_pose_from_correspondences(
     points_cam1: Sequence[Sequence[float]],
     points_cam2: Sequence[Sequence[float]],
