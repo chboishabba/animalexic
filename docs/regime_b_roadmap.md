@@ -18,23 +18,44 @@ This document is the current execution frontier for the opportunistic multi-view
 | Static-anchor association | implemented for explicit upstream IDs | exact `anchor_id`, static/confidence/time gates, provenance retained |
 | Robust weld outlier rejection | implemented | deterministic minimal-set consensus + refit |
 | Per-ray world camera origins in voxel guard | implemented | optional `(N,3)` origin fibre; zero-origin SBS fallback preserved |
+| World-weld -> existing guard adapter | implemented | world keyframes + observations -> existing frame points/origins/weights/residuals contract |
+| Guard transport comparison/frontier | implemented | state agreement, ascended IoU, score residual, change mask, signed `{-1,0,+1}` frontier |
+| Known/perturbed/recovered/welded sensitivity run | unpaid | comparison surface exists; controlled end-to-end guard runs remain to execute |
 | Descriptor/track anchor identity discovery | unpaid | similarity cannot auto-promote to same-object identity |
 | Online camera/IMU extrinsic estimation | unpaid | current correction consumes supplied extrinsic |
 | Camera/IMU clock-offset estimation | unpaid | current correction consumes supplied alignment receipt |
 | Online IMU bias estimation | unpaid | biases are explicit input coordinates |
 | Multi-keyframe optimized VIO / loop closure | unpaid | candidate composition is not BA/SLAM |
-| Shared-world voxel/surfel quality validation | unpaid | origin carrier exists; end-to-end quality receipt does not |
+| Shared-world voxel/surfel quality validation | unpaid | origin carrier/adapter exists; end-to-end quality receipt does not |
 | Rolling-shutter refinement | unpaid | explicit debt remains in `CameraModel` |
 | Real dual-phone / N-phone field validation | unpaid | required before handheld claims |
 
+## dashiRTX cross-pollination
+
+The sibling `chboishabba/dashiRTX` work provides a useful architecture, not a replacement geometry model. Its PDA/MDL light-transport toy explicitly transports depth/radiance between camera poses, measures reprojection error, retains a signed ternary frontier, importance and persistent state, and targets refresh/refinement where transport error is consumer-visible. Its roadmap similarly prioritizes quality-targeted `render -> error -> refine -> retrain` loops.
+
+Animalexic now reuses that pattern over geometry only:
+
+```text
+known-pose oracle guard
+  -> candidate pose/world-weld transport
+  -> existing voxel guard
+  -> state/score residual
+  -> signed {-1,0,+1} frontier
+  -> refine the pose/weld fibre causing consumer-visible error
+```
+
+This does **not** import radiance semantics, MDL scores as truth, or dashiRTX rendering authority. It is a cross-domain transport/refinement pattern only.
+
 ## Highest-alpha next sequence
 
-1. **World-weld -> existing guard adapter.** Convert world-welded camera keyframes plus observations into the existing `frame_points` / `frame_camera_origins` / weights / residuals contract without adding a second voxel governance path.
-2. **Known-vs-recovered pose sensitivity experiment.** On a controlled multicamera carrier, compare voxel support when camera origins come from known pose, perturbed pose, recovered pose, and robust-welded pose. Measure overlap, residual margin, and promotion-state changes.
-3. **Anchor identity discovery as a candidate producer.** Add static feature/track proposals with explicit ambiguity and provenance. Descriptor or geometric similarity may propose identity; only a governed same-object receipt may pay it.
-4. **Temporal anchor tracks.** Preserve anchor identity across time and reject identity switches before cross-camera welding.
-5. **Estimate clock/extrinsic/bias coordinates.** Move supplied VIO calibration coordinates into learned candidates one at a time, each with a residual-based abstention route.
-6. **Real phone capture.** Two unsynchronised phones first; then N cameras of heterogeneous type. Keep rolling shutter and weak overlap as explicit degradation coordinates.
+1. **Execute the controlled guard sensitivity portfolio.** Run the same world observations through known pose, controlled perturbations, image-recovered pose, and robust-welded pose. Measure ascended IoU, state agreement, score residual and the signed frontier.
+2. **Attribute the frontier to the producer fibre.** Separate camera-origin error, orientation error, world-weld residual, scale error and observation residual instead of optimizing one undifferentiated geometry score.
+3. **Quality-targeted pose/weld refinement.** Borrow the dashiRTX refinement discipline: refine only fibres that change the downstream consumer surface; stop when the consumer residual is within its policy bound rather than demanding globally perfect pose.
+4. **Anchor identity discovery as a candidate producer.** Add static feature/track proposals with explicit ambiguity and provenance. Descriptor or geometric similarity may propose identity; only a governed same-object receipt may pay it.
+5. **Temporal anchor tracks.** Preserve anchor identity across time and reject identity switches before cross-camera welding.
+6. **Estimate clock/extrinsic/bias coordinates.** Move supplied VIO calibration coordinates into learned candidates one at a time, each with a residual-based abstention route.
+7. **Real phone capture.** Two unsynchronised phones first; then N cameras of heterogeneous type. Keep rolling shutter and weak overlap as explicit degradation coordinates.
 
 ## Non-collapse rules
 
@@ -44,6 +65,9 @@ This document is the current execution frontier for the opportunistic multi-view
 - `Sim(3)` alignment != metric scale paid
 - corrected candidate trajectory != promoted VIO
 - world-welded camera origin != promoted voxel
+- lower guard transport residual != correct pose
+- better ascended IoU != physical truth
+- dashiRTX lower MDL / render error != Animalexic geometry truth
 - successful synthetic recovery != Issue-20 archive validation
 - successful Issue-20 validation != handheld-phone validation
 
