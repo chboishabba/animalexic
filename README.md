@@ -28,7 +28,13 @@ The handheld lane now has both an inertial predictor and a bounded visual correc
 - `correct_visual_inertial_segment(...)` converts the inertial increment through a supplied camera<-IMU rigid transform, checks it against a static-scene visual relative pose, applies visual rotation only when the residual gate passes, applies visual metric translation only when scale is explicitly paid, and returns `abstain` on incompatible observations.
 - `compose_candidate_trajectory(...)` accumulates accepted corrected intervals into time-indexed local camera keyframes using deterministic SE(3) transport.
 
-This is **not yet promoted/full VIO**. The correction path consumes supplied camera/IMU extrinsic and clock-alignment receipts; it does not yet estimate those quantities online. Online bias estimation, multi-keyframe optimization, loop closure, rolling-shutter correction, real-phone validation, and cross-camera world-frame welding remain unpaid.
+Cross-camera alignment now has its own producer in `scripts/cross_camera_world_weld.py`:
+
+- `estimate_world_weld(...)` estimates an `SE(3)` weld from shared static 3D anchors when metric scale is already paid, or an explicit `Sim(3)` weld when scale must remain a coordinate.
+- geometrically degenerate/collinear anchor sets fail closed;
+- `apply_world_weld_to_trajectory(...)` transports candidate local keyframes into the target shared world without changing their candidate status.
+
+This is **not yet promoted/full VIO or field-ready multicam fusion**. The correction path consumes supplied camera/IMU extrinsic and clock-alignment receipts; it does not yet estimate those quantities online. The world weld currently assumes already-associated same-object static anchors and has no robust outlier/temporal association layer. Online bias estimation, multi-keyframe optimization, loop closure, rolling-shutter correction, real-phone validation, and downstream shared-world voxel/surfel validation remain unpaid.
 
 This is **consumer-contract parity, not evidence parity**: known metadata and image-recovered pose may feed the same downstream ray/voxel/surfel machinery once metric scale is paid, but their provenance, uncertainty, validation status, and remaining debt stay distinct.
 
@@ -42,10 +48,12 @@ known-pose multicam                         [implemented]
   -> IMU preintegration prior              [implemented]
   -> bounded visual-inertial correction    [implemented; synthetic validation]
   -> candidate local camera trajectory     [implemented; deterministic composition]
+  -> rigid/similarity cross-camera weld    [implemented; synthetic validation]
+  -> static-anchor association/outliers    [unpaid]
   -> online extrinsic/clock/bias estimation[unpaid]
   -> multi-keyframe optimized VIO          [unpaid]
-  -> cross-camera shared-world weld        [unpaid]
-  -> clock / rolling-shutter refinement    [unpaid]
+  -> shared-world voxel/surfel validation  [unpaid]
+  -> rolling-shutter refinement            [unpaid]
   -> fully handheld multicam fusion        [unpaid]
 ```
 
