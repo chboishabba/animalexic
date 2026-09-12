@@ -23,6 +23,25 @@ class ClockOffsetCandidate:
     clock_alignment_paid: bool = False
 
 
+@dataclass(frozen=True)
+class GyroBiasCandidate:
+    bias_rad_s: tuple[float, float, float]
+    axis_std_rad_s: tuple[float, float, float]
+    sample_count: int
+    noisy: bool
+    status: str
+    online_bias_paid: bool = False
+
+
+@dataclass(frozen=True)
+class CameraIMURotationCandidate:
+    rotation_camera_from_imu: tuple[float, ...]
+    rms_vector_residual: float
+    pair_count: int
+    status: str
+    extrinsic_calibration_paid: bool = False
+
+
 def _validated_series(samples):
     values = list(samples)
     if len(values) < 2:
@@ -59,12 +78,6 @@ def estimate_clock_offset_candidate(
     min_residual_margin: float,
     max_rms_residual: float | None = None,
 ) -> ClockOffsetCandidate:
-    """Estimate a candidate time offset by residual over overlapping motion.
-
-    The sign convention is: ``sensor_time + offset_s`` is compared with the
-    reference clock. The result remains candidate-only; a downstream alignment
-    receipt must still pay use of this offset in VIO correction.
-    """
     if min_overlap < 2:
         raise ValueError("min_overlap must be at least two")
     if min_residual_margin < 0 or not math.isfinite(min_residual_margin):
@@ -90,9 +103,7 @@ def estimate_clock_offset_candidate(
         if len(query_times) < min_overlap:
             continue
         interpolated = _interpolate_matrix(
-            aligned_sensor_times,
-            sensor_values,
-            query_times,
+            aligned_sensor_times, sensor_values, query_times
         )
         residual = reference_values[mask] - interpolated
         rms = float(np.sqrt(np.mean(np.square(residual))))
@@ -116,4 +127,76 @@ def estimate_clock_offset_candidate(
         ambiguous=bool(ambiguous),
         status="abstain" if ambiguous else "candidate",
         clock_alignment_paid=False,
+    )
+
+
+def estimate_gyro_bias_candidate(
+    stationary_gyro_samples,
+    *,
+    min_samples: int,
+    max_axis_std_rad_s: float,
+) -> GyroBiasCandidate:
+    """Estimate a stationary gyro-bias candidate without claiming online bias payment."""
+    if min_samples < 2:
+        raise ValueError("min_samples must be at least two")
+    if max_axis_std_rad_s < 0 or not math.isfinite(max_axis_std_rad_s):
+        raise ValueError("max_axis_std_rad_s must be finite and non-negative")
+    _, values = _validated_series(stationary_gyro_samples)
+    if values.shape[1] != 3:
+        raise ValueError("gyro samples must be 3-vectors")
+    if len(values) < min_samples:
+        raise ValueError("not enough stationary gyro samples")
+    bias = np.mean(values, axis=0)
+    axis_std = np.std(values, axis=0)
+    noisy = bool(np.any(axis_std > max_axis_std_rad_s))
+    return GyroBiasCandidate(
+        bias_rad_s=tuple(float(x) for x in bias),
+        axis_std_rad_s=tuple(float(x) for x in axis_std),
+        sample_count=int(len(values)),
+        noisy=noisy,
+        status="abstain" if noisy else "candidate",
+        online_bias_paid=False,
+    )
+
+
+def estimate_camera_imu_rotation_candidate(
+    imu_vectors,
+    camera_vectors,
+    *,
+    max_rms_vector_residual: float,
+) -> CameraIMURotationCandidate:
+    """Solve a bounded Wahba/Kabsch camera<-IMU rotation candidate.
+
+    Input vectors are paired motion/gravity/direction observations expressed in
+    the IMU and camera frames.  At least rank-2 excitation is required.  This
+    estimates rotation only; lever-arm translation and field validation remain
+    separate debt.
+    """
+    if max_rms_vector_residual < 0 or not math.isfinite(max_rms_vector_residual):
+        raise ValueError("max_rms_vector_residual must be finite and non-negative")
+    imu = np.asarray(imu_vectors, dtype=np.float64)
+    camera = np.asarray(camera_vectors, dtype=np.float64)
+    if imu.ndim != 2 or imu.shape[1:] != (3,) or camera.shape != imu.shape:
+        raise ValueError("paired IMU/camera vectors must be matching Nx3 arrays")
+    if len(imu) < 3 or not np.all(np.isfinite(imu)) or not np.all(np.isfinite(camera)):
+        raise ValueError("at least three finite vector pairs are required")
+    if np.linalg.matrix_rank(imu, tol=1e-10) < 2:
+        raise ValueError("camera/IMU rotation calibration lacks non-collinear excitation")
+
+    covariance = camera.T @ imu
+    U, _, Vt = np.linalg.svd(covariance)
+    correction = np.eye(3, dtype=np.float64)
+    if np.linalg.det(U @ Vt) < 0:
+        correction[-1, -1] = -1.0
+    rotation = U @ correction @ Vt
+    predicted = (rotation @ imu.T).T
+    residual = predicted - camera
+    rms = float(np.sqrt(np.mean(np.sum(residual * residual, axis=1))))
+    abstain = rms > max_rms_vector_residual
+    return CameraIMURotationCandidate(
+        rotation_camera_from_imu=tuple(float(x) for x in rotation.reshape(-1)),
+        rms_vector_residual=rms,
+        pair_count=int(len(imu)),
+        status="abstain" if abstain else "candidate",
+        extrinsic_calibration_paid=False,
     )
