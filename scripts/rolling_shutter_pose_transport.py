@@ -16,6 +16,14 @@ class RollingShutterReadoutCandidate:
 
 
 @dataclass(frozen=True)
+class RowTimingObservation:
+    row: int
+    image_height: int
+    measured_offset_s: float
+    provenance: str
+
+
+@dataclass(frozen=True)
 class RowPoseCandidate:
     capture_time_s: float
     position_world_m: tuple[float, float, float]
@@ -36,12 +44,64 @@ def _validate_readout(readout: RollingShutterReadoutCandidate) -> None:
         raise ValueError("readout source reference is required")
 
 
+def estimate_readout_candidate(
+    observations,
+    *,
+    min_observations: int,
+    min_normalized_row_span: float,
+    max_rms_timing_residual_s: float,
+) -> RollingShutterReadoutCandidate:
+    """Fit a candidate line ``offset = slope * centered_row``.
+
+    Positive slope means top-to-bottom readout; negative slope means
+    bottom-to-top.  The measured row timing offsets must come from a separate
+    visual/timing producer.  This function does not pay readout calibration.
+    """
+    values = list(observations)
+    if min_observations < 2 or len(values) < min_observations:
+        raise ValueError("not enough row timing observations")
+    if not 0.0 <= min_normalized_row_span <= 1.0:
+        raise ValueError("min_normalized_row_span must be in [0,1]")
+    if max_rms_timing_residual_s < 0 or not math.isfinite(max_rms_timing_residual_s):
+        raise ValueError("max_rms_timing_residual_s must be finite and non-negative")
+
+    x = []
+    y = []
+    provenance = []
+    for obs in values:
+        if obs.image_height < 2 or not 0 <= obs.row < obs.image_height:
+            raise ValueError("row timing observation is outside image")
+        if not math.isfinite(obs.measured_offset_s) or not obs.provenance:
+            raise ValueError("row timing observation requires finite offset and provenance")
+        x.append(float(obs.row) / float(obs.image_height - 1) - 0.5)
+        y.append(float(obs.measured_offset_s))
+        provenance.append(obs.provenance)
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    row_span = float(np.max(x) - np.min(x))
+    if row_span < min_normalized_row_span:
+        raise ValueError("row timing observations lack sufficient image-height span")
+    denom = float(np.dot(x, x))
+    if denom <= 1e-15:
+        raise ValueError("row timing design is degenerate")
+    slope = float(np.dot(x, y) / denom)
+    predicted = slope * x
+    rms = float(np.sqrt(np.mean(np.square(predicted - y))))
+    direction = "top_to_bottom" if slope >= 0 else "bottom_to_top"
+    return RollingShutterReadoutCandidate(
+        readout_time_s=abs(slope),
+        direction=direction,
+        source_reference="row-timing-fit:" + ",".join(provenance),
+        status="abstain" if rms > max_rms_timing_residual_s else "candidate",
+        readout_calibration_paid=False,
+    )
+
+
 def row_capture_time_offset_s(
     row: int,
     image_height: int,
     readout: RollingShutterReadoutCandidate,
 ) -> float:
-    """Return row time relative to the nominal frame-centre timestamp."""
     _validate_readout(readout)
     if image_height < 2:
         raise ValueError("image_height must be at least two")
@@ -62,14 +122,12 @@ def _project_so3(matrix: np.ndarray) -> np.ndarray:
 
 
 def _rotation_power(rotation: np.ndarray, fraction: float) -> np.ndarray:
-    """Interpolate an SO(3) rotation by axis-angle exponentiation."""
     R = _project_so3(rotation)
     cos_theta = float(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0))
     theta = math.acos(cos_theta)
     if theta < 1e-12:
         return np.eye(3)
     if abs(math.pi - theta) < 1e-7:
-        # Stable axis extraction near pi from the symmetric part.
         values, vectors = np.linalg.eigh((R + np.eye(3)) / 2.0)
         axis = vectors[:, int(np.argmax(values))]
         axis = axis / (np.linalg.norm(axis) + 1e-15)
@@ -95,11 +153,6 @@ def interpolate_row_pose(
     before,
     after,
 ) -> RowPoseCandidate:
-    """Interpolate a candidate camera pose at the row capture time.
-
-    This transports an already-supplied readout model through a candidate
-    trajectory. It does not estimate readout time/direction or pay calibration.
-    """
     offset = row_capture_time_offset_s(row, image_height, readout)
     capture_time = float(frame_time_s) + offset
     if getattr(before, "status", None) != "candidate" or getattr(after, "status", None) != "candidate":
