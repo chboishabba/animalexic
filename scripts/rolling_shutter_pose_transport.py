@@ -16,6 +16,13 @@ class RollingShutterReadoutCandidate:
 
 
 @dataclass(frozen=True)
+class ReadoutAcceptanceReceipt:
+    candidate_reference: str
+    accepted_by: str
+    receipt_ref: str
+
+
+@dataclass(frozen=True)
 class RowTimingObservation:
     row: int
     image_height: int
@@ -51,12 +58,6 @@ def estimate_readout_candidate(
     min_normalized_row_span: float,
     max_rms_timing_residual_s: float,
 ) -> RollingShutterReadoutCandidate:
-    """Fit a candidate line ``offset = slope * centered_row``.
-
-    Positive slope means top-to-bottom readout; negative slope means
-    bottom-to-top.  The measured row timing offsets must come from a separate
-    visual/timing producer.  This function does not pay readout calibration.
-    """
     values = list(observations)
     if min_observations < 2 or len(values) < min_observations:
         raise ValueError("not enough row timing observations")
@@ -94,6 +95,27 @@ def estimate_readout_candidate(
         source_reference="row-timing-fit:" + ",".join(provenance),
         status="abstain" if rms > max_rms_timing_residual_s else "candidate",
         readout_calibration_paid=False,
+    )
+
+
+def accept_readout_candidate(
+    candidate: RollingShutterReadoutCandidate,
+    receipt: ReadoutAcceptanceReceipt,
+    *,
+    candidate_reference: str,
+) -> RollingShutterReadoutCandidate:
+    if candidate.status != "candidate":
+        raise ValueError("only candidate readout models may be accepted")
+    if receipt.candidate_reference != candidate_reference:
+        raise ValueError("readout acceptance receipt candidate reference does not match")
+    if not candidate_reference or not receipt.accepted_by or not receipt.receipt_ref:
+        raise ValueError("readout acceptance requires candidate, actor, and receipt references")
+    return RollingShutterReadoutCandidate(
+        readout_time_s=float(candidate.readout_time_s),
+        direction=candidate.direction,
+        source_reference=receipt.receipt_ref,
+        status="candidate",
+        readout_calibration_paid=True,
     )
 
 
@@ -181,5 +203,5 @@ def interpolate_row_pose(
         rotation_world_from_camera=tuple(float(x) for x in rotation.reshape(-1)),
         readout_source_reference=readout.source_reference,
         status="candidate",
-        readout_calibration_paid=False,
+        readout_calibration_paid=bool(readout.readout_calibration_paid),
     )
