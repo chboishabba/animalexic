@@ -72,6 +72,12 @@ class SensitivityRun:
     guard_run: GuardRun
 
 
+@dataclass(frozen=True)
+class QualityTargetedRefinementResult:
+    history: tuple[SensitivityRun, ...]
+    termination: str
+
+
 def sensitivity_case_from_comparison(
     perturbation: GeometryFibrePerturbation,
     comparison: GuardTransportComparison,
@@ -98,7 +104,6 @@ def sensitivity_case_from_comparison(
 
 
 def _dominates(a: SensitivityCase, b: SensitivityCase) -> bool:
-    """Return True when a is at least as consumer-visible as b on all axes."""
     ax = a.defect_coordinates
     bx = b.defect_coordinates
     return all(x >= y for x, y in zip(ax, bx)) and any(
@@ -107,7 +112,6 @@ def _dominates(a: SensitivityCase, b: SensitivityCase) -> bool:
 
 
 def select_refinement_frontier(cases) -> list[SensitivityCase]:
-    """Return Pareto-maximal consumer-visible defects without scalarization."""
     unpaid = [case for case in cases if not case.within_policy]
     frontier = []
     for case in unpaid:
@@ -128,16 +132,7 @@ def _rotation_xyz_degrees(delta_deg_xyz) -> np.ndarray:
     return Rz @ Ry @ Rx
 
 
-def perturb_guard_frames(
-    frames,
-    perturbation: GeometryFibrePerturbation,
-) -> list[GuardFrameInputs]:
-    """Inject one controlled geometry-fibre defect into guard-frame inputs.
-
-    Endpoint rotation is performed about each original camera origin, then the
-    ray length is scaled explicitly. Camera-origin translation is applied as a
-    separate coordinate so downstream attribution can distinguish the fibres.
-    """
+def perturb_guard_frames(frames, perturbation: GeometryFibrePerturbation) -> list[GuardFrameInputs]:
     origin_delta = np.asarray(perturbation.origin_delta_m, dtype=np.float64)
     if origin_delta.shape != (3,) or not np.all(np.isfinite(origin_delta)):
         raise ValueError("origin_delta_m must be finite xyz")
@@ -160,8 +155,7 @@ def perturb_guard_frames(
         candidate_origins = origins + origin_delta[None, :]
         candidate_points = candidate_origins + rotated_scaled_ray
         candidate_residuals = np.maximum(
-            0.0,
-            np.asarray(frame.residuals, dtype=np.float64) + residual_delta,
+            0.0, np.asarray(frame.residuals, dtype=np.float64) + residual_delta
         )
         out.append(
             GuardFrameInputs(
@@ -198,7 +192,6 @@ def run_guard_sensitivity_portfolio(
     params,
     policy: ConsumerQualityPolicy,
 ) -> list[SensitivityRun]:
-    """Run controlled geometry defects through one unchanged voxel consumer."""
     reference_frames = list(reference_frames)
     oracle = execute_guard_frames(reference_frames, grid_spec, params)
     runs = []
@@ -206,10 +199,7 @@ def run_guard_sensitivity_portfolio(
         candidate_frames = perturb_guard_frames(reference_frames, perturbation)
         candidate = execute_guard_frames(candidate_frames, grid_spec, params)
         comparison = compare_guard_transport(
-            oracle.states,
-            candidate.states,
-            oracle.score,
-            candidate.score,
+            oracle.states, candidate.states, oracle.score, candidate.score
         )
         case = sensitivity_case_from_comparison(perturbation, comparison, policy)
         runs.append(SensitivityRun(case, comparison, candidate))
@@ -221,7 +211,6 @@ def active_perturbation_fibres(
     *,
     atol: float = 1e-12,
 ) -> tuple[str, ...]:
-    """Name explicit defect coordinates without collapsing them into one score."""
     active = []
     if any(abs(float(x)) > atol for x in perturbation.origin_delta_m):
         active.append("camera_origin")
@@ -252,6 +241,10 @@ def _shrink_perturbation(
     )
 
 
+def _same_consumer_coordinates(a: SensitivityCase, b: SensitivityCase, atol: float) -> bool:
+    return all(abs(x - y) <= atol for x, y in zip(a.defect_coordinates, b.defect_coordinates))
+
+
 def quality_targeted_refinement(
     reference_frames,
     initial_perturbation: GeometryFibrePerturbation,
@@ -261,32 +254,25 @@ def quality_targeted_refinement(
     *,
     max_steps: int = 8,
     shrink_factor: float = 0.5,
-) -> list[SensitivityRun]:
-    """Shrink only the named defect coordinates until the consumer is adequate.
-
-    This is a bounded diagnostic/refinement experiment, not a pose optimizer.
-    It preserves the observation carrier and asks how much coordinate error the
-    downstream consumer tolerates. No scalar loss is used and no promotion is
-    performed.
-    """
+    plateau_atol: float = 1e-12,
+) -> QualityTargetedRefinementResult:
+    """Refine explicit defect coordinates without pretending quantization closes debt."""
     if max_steps < 0:
         raise ValueError("max_steps must be non-negative")
     history = []
     perturbation = initial_perturbation
     for step in range(max_steps + 1):
         run = run_guard_sensitivity_portfolio(
-            reference_frames,
-            [perturbation],
-            grid_spec,
-            params,
-            policy,
+            reference_frames, [perturbation], grid_spec, params, policy
         )[0]
         history.append(run)
         if run.case.within_policy:
-            break
+            return QualityTargetedRefinementResult(tuple(history), "within_policy")
+        if len(history) >= 2 and _same_consumer_coordinates(
+            history[-2].case, history[-1].case, plateau_atol
+        ):
+            return QualityTargetedRefinementResult(tuple(history), "consumer_plateau")
         perturbation = _shrink_perturbation(
-            perturbation,
-            shrink_factor,
-            step + 1,
+            perturbation, shrink_factor, step + 1
         )
-    return history
+    return QualityTargetedRefinementResult(tuple(history), "max_steps")
