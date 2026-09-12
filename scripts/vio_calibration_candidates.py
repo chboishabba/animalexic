@@ -43,6 +43,24 @@ class CameraIMURotationCandidate:
 
 
 @dataclass(frozen=True)
+class HandEyeMotionPair:
+    rotation_camera_motion: tuple[float, ...]
+    translation_camera_motion_m: tuple[float, float, float]
+    rotation_imu_motion: tuple[float, ...]
+    translation_imu_motion_m: tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class CameraIMUTranslationCandidate:
+    translation_camera_from_imu_m: tuple[float, float, float]
+    rms_translation_residual_m: float
+    motion_pair_count: int
+    linear_rank: int
+    status: str
+    lever_arm_paid: bool = False
+
+
+@dataclass(frozen=True)
 class CalibrationAcceptanceReceipt:
     coordinate: str
     candidate_reference: str
@@ -114,13 +132,11 @@ def estimate_clock_offset_candidate(
         max_rms_residual < 0 or not math.isfinite(max_rms_residual)
     ):
         raise ValueError("max_rms_residual must be finite and non-negative")
-
     reference_times, reference_values = _validated_series(reference_samples)
     sensor_times, sensor_values = _validated_series(sensor_samples)
     offsets = [float(offset) for offset in search_offsets_s]
     if not offsets or not all(math.isfinite(offset) for offset in offsets):
         raise ValueError("search_offsets_s must contain finite values")
-
     scored = []
     for offset in offsets:
         aligned_sensor_times = sensor_times + offset
@@ -134,7 +150,6 @@ def estimate_clock_offset_candidate(
         residual = reference_values[mask] - interpolated
         rms = float(np.sqrt(np.mean(np.square(residual))))
         scored.append((rms, offset, int(len(query_times))))
-
     if not scored:
         raise ValueError("no candidate clock offset has sufficient overlap")
     scored.sort(key=lambda row: (row[0], abs(row[1]), row[1]))
@@ -144,7 +159,6 @@ def estimate_clock_offset_candidate(
     ambiguous = margin < min_residual_margin
     if max_rms_residual is not None and best_rms > max_rms_residual:
         ambiguous = True
-
     return ClockOffsetCandidate(
         offset_s=float(best_offset),
         rms_residual=float(best_rms),
@@ -200,7 +214,6 @@ def estimate_camera_imu_rotation_candidate(
         raise ValueError("at least three finite vector pairs are required")
     if np.linalg.matrix_rank(imu, tol=1e-10) < 2:
         raise ValueError("camera/IMU rotation calibration lacks non-collinear excitation")
-
     covariance = camera.T @ imu
     U, _, Vt = np.linalg.svd(covariance)
     correction = np.eye(3, dtype=np.float64)
@@ -220,12 +233,60 @@ def estimate_camera_imu_rotation_candidate(
     )
 
 
-def _validate_acceptance(
-    receipt: CalibrationAcceptanceReceipt,
+def estimate_camera_imu_translation_candidate(
+    motion_pairs,
     *,
-    coordinate: str,
-    candidate_reference: str,
-) -> None:
+    rotation_camera_from_imu,
+    max_rms_translation_residual_m: float,
+) -> CameraIMUTranslationCandidate:
+    """Estimate hand-eye lever arm t_X from A X = X B with known R_X.
+
+    For each paired relative motion, translation obeys
+    (R_A - I) t_X = R_X t_B - t_A.  The stacked system must have full rank;
+    pure translations or single-axis-poor excitation therefore fail closed.
+    """
+    if max_rms_translation_residual_m < 0 or not math.isfinite(max_rms_translation_residual_m):
+        raise ValueError("max_rms_translation_residual_m must be finite and non-negative")
+    pairs = list(motion_pairs)
+    if len(pairs) < 2:
+        raise ValueError("at least two paired hand-eye motions are required")
+    R_x = np.asarray(rotation_camera_from_imu, dtype=np.float64).reshape(3, 3)
+    if not np.all(np.isfinite(R_x)):
+        raise ValueError("camera/IMU rotation must be finite")
+    lhs = []
+    rhs = []
+    for pair in pairs:
+        R_a = np.asarray(pair.rotation_camera_motion, dtype=np.float64).reshape(3, 3)
+        R_b = np.asarray(pair.rotation_imu_motion, dtype=np.float64).reshape(3, 3)
+        t_a = np.asarray(pair.translation_camera_motion_m, dtype=np.float64).reshape(3)
+        t_b = np.asarray(pair.translation_imu_motion_m, dtype=np.float64).reshape(3)
+        if not all(np.all(np.isfinite(x)) for x in (R_a, R_b, t_a, t_b)):
+            raise ValueError("hand-eye motion coordinates must be finite")
+        # Rotation consistency is a prerequisite for using the translation equation.
+        if not np.allclose(R_a @ R_x, R_x @ R_b, atol=1e-5, rtol=1e-5):
+            raise ValueError("hand-eye motion pair violates supplied rotation extrinsic")
+        lhs.append(R_a - np.eye(3))
+        rhs.append(R_x @ t_b - t_a)
+    A = np.vstack(lhs)
+    b = np.concatenate(rhs)
+    rank = int(np.linalg.matrix_rank(A, tol=1e-10))
+    if rank < 3:
+        raise ValueError("hand-eye lever-arm system lacks full rotational excitation")
+    t_x, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    residual = A @ t_x - b
+    rms = float(np.sqrt(np.mean(np.square(residual))))
+    abstain = rms > max_rms_translation_residual_m
+    return CameraIMUTranslationCandidate(
+        translation_camera_from_imu_m=tuple(float(x) for x in t_x),
+        rms_translation_residual_m=rms,
+        motion_pair_count=len(pairs),
+        linear_rank=rank,
+        status="abstain" if abstain else "candidate",
+        lever_arm_paid=False,
+    )
+
+
+def _validate_acceptance(receipt, *, coordinate: str, candidate_reference: str) -> None:
     if receipt.coordinate != coordinate:
         raise ValueError("acceptance receipt coordinate does not match candidate")
     if receipt.candidate_reference != candidate_reference:
@@ -234,34 +295,23 @@ def _validate_acceptance(
         raise ValueError("acceptance receipt requires actor, receipt ref, and candidate ref")
 
 
-def accept_clock_offset_candidate(
-    candidate: ClockOffsetCandidate,
-    receipt: CalibrationAcceptanceReceipt,
-    *,
-    candidate_reference: str,
-) -> PaidClockAlignment:
+def accept_clock_offset_candidate(candidate, receipt, *, candidate_reference: str) -> PaidClockAlignment:
     if candidate.status != "candidate" or candidate.ambiguous:
         raise ValueError("only unambiguous clock candidates may be paid")
-    _validate_acceptance(
-        receipt, coordinate="clock_offset", candidate_reference=candidate_reference
-    )
+    _validate_acceptance(receipt, coordinate="clock_offset", candidate_reference=candidate_reference)
     return PaidClockAlignment(float(candidate.offset_s), receipt.receipt_ref)
 
 
 def accept_camera_imu_rotation_candidate(
-    candidate: CameraIMURotationCandidate,
+    candidate,
     *,
     translation_camera_from_imu_m,
-    receipt: CalibrationAcceptanceReceipt,
+    receipt,
     candidate_reference: str,
 ) -> PaidCameraIMUExtrinsic:
     if candidate.status != "candidate":
         raise ValueError("only candidate camera/IMU rotations may be paid")
-    _validate_acceptance(
-        receipt,
-        coordinate="camera_imu_rotation",
-        candidate_reference=candidate_reference,
-    )
+    _validate_acceptance(receipt, coordinate="camera_imu_rotation", candidate_reference=candidate_reference)
     translation = np.asarray(translation_camera_from_imu_m, dtype=np.float64)
     if translation.shape != (3,) or not np.all(np.isfinite(translation)):
         raise ValueError("camera/IMU lever-arm translation must be finite xyz")
@@ -272,17 +322,10 @@ def accept_camera_imu_rotation_candidate(
     )
 
 
-def accept_gyro_bias_candidate(
-    candidate: GyroBiasCandidate,
-    receipt: CalibrationAcceptanceReceipt,
-    *,
-    candidate_reference: str,
-) -> PaidGyroBias:
+def accept_gyro_bias_candidate(candidate, receipt, *, candidate_reference: str) -> PaidGyroBias:
     if candidate.status != "candidate" or candidate.noisy:
         raise ValueError("only non-noisy gyro bias candidates may be paid")
-    _validate_acceptance(
-        receipt, coordinate="gyro_bias", candidate_reference=candidate_reference
-    )
+    _validate_acceptance(receipt, coordinate="gyro_bias", candidate_reference=candidate_reference)
     return PaidGyroBias(
         bias_rad_s=tuple(candidate.bias_rad_s),
         source_reference=receipt.receipt_ref,
