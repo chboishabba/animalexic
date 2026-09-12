@@ -5,6 +5,8 @@ import math
 
 import numpy as np
 
+from scripts.static_anchor_association import StaticAnchorObservation
+
 
 @dataclass(frozen=True)
 class StaticFeatureObservation:
@@ -14,6 +16,7 @@ class StaticFeatureObservation:
     descriptor: tuple[float, ...]
     static_confidence: float
     provenance: str
+    point_local_m: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,16 @@ class CandidateAnchorTrack:
     provenance_chain: tuple[str, ...]
     status: str = "candidate"
     same_object_paid: bool = False
+
+
+@dataclass(frozen=True)
+class SameObjectAnchorReceipt:
+    anchor_id: str
+    source_feature_id: str
+    target_feature_id: str
+    source_provenance: str
+    target_provenance: str
+    receipt_ref: str
 
 
 def _descriptor(observation: StaticFeatureObservation) -> np.ndarray:
@@ -133,11 +146,6 @@ def build_temporal_candidate_tracks(
     min_margin: float,
     min_static_confidence: float = 0.9,
 ) -> list[CandidateAnchorTrack]:
-    """Build descriptor-continuity tracks that remain candidate-only.
-
-    This intentionally does not turn temporal continuity into same-object truth.
-    Ambiguous competing observations at the next timestamp terminate a track.
-    """
     if max_time_delta_s < 0 or max_descriptor_distance < 0 or min_margin < 0:
         raise ValueError("track thresholds must be non-negative")
     eligible = [
@@ -154,11 +162,10 @@ def build_temporal_candidate_tracks(
     tracks = []
     next_track = 0
     for camera_id in sorted(by_camera):
-        values = sorted(
+        remaining = sorted(
             by_camera[camera_id],
             key=lambda value: (float(value.time_s), value.feature_id),
         )
-        remaining = list(values)
         while remaining:
             current = remaining.pop(0)
             members = [current]
@@ -193,3 +200,71 @@ def build_temporal_candidate_tracks(
             )
             next_track += 1
     return tracks
+
+
+def _paid_point(observation: StaticFeatureObservation) -> tuple[float, float, float]:
+    if observation.point_local_m is None:
+        raise ValueError("same-object payment requires a local 3D anchor point")
+    point = np.asarray(observation.point_local_m, dtype=np.float64)
+    if point.shape != (3,) or not np.all(np.isfinite(point)):
+        raise ValueError("anchor point must be finite xyz")
+    return tuple(float(x) for x in point)
+
+
+def materialise_paid_anchor_observations(
+    candidate: AnchorIdentityCandidate,
+    receipt: SameObjectAnchorReceipt,
+    source_observation: StaticFeatureObservation,
+    target_observation: StaticFeatureObservation,
+) -> tuple[StaticAnchorObservation, StaticAnchorObservation]:
+    """Cross the identity seam only with an exact external same-object receipt."""
+    if candidate.status != "candidate" or candidate.ambiguous:
+        raise ValueError("only unambiguous identity candidates may receive payment")
+    if not receipt.anchor_id or not receipt.receipt_ref:
+        raise ValueError("same-object receipt requires anchor_id and receipt_ref")
+    expected = (
+        candidate.source_feature_id,
+        candidate.target_feature_id,
+        candidate.source_provenance,
+        candidate.target_provenance,
+    )
+    paid = (
+        receipt.source_feature_id,
+        receipt.target_feature_id,
+        receipt.source_provenance,
+        receipt.target_provenance,
+    )
+    actual = (
+        source_observation.feature_id,
+        target_observation.feature_id,
+        source_observation.provenance,
+        target_observation.provenance,
+    )
+    if paid != expected or actual != expected:
+        raise ValueError("same-object receipt does not match candidate feature/provenance identity")
+    if int(source_observation.camera_id) != candidate.source_camera_id:
+        raise ValueError("source camera does not match candidate")
+    if int(target_observation.camera_id) != candidate.target_camera_id:
+        raise ValueError("target camera does not match candidate")
+
+    source_anchor = StaticAnchorObservation(
+        anchor_id=receipt.anchor_id,
+        camera_id=str(source_observation.camera_id),
+        time_s=float(source_observation.time_s),
+        point_local_m=_paid_point(source_observation),
+        is_static=True,
+        confidence=float(source_observation.static_confidence),
+        provenance_ref=f"{source_observation.provenance}|same-object:{receipt.receipt_ref}",
+        status="candidate",
+    )
+    target_anchor = StaticAnchorObservation(
+        anchor_id=receipt.anchor_id,
+        camera_id=str(target_observation.camera_id),
+        time_s=float(target_observation.time_s),
+        point_local_m=_paid_point(target_observation),
+        is_static=True,
+        confidence=float(target_observation.static_confidence),
+        provenance_ref=f"{target_observation.provenance}|same-object:{receipt.receipt_ref}",
+        status="candidate",
+    )
+    return source_anchor, target_anchor
