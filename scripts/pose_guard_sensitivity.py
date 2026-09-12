@@ -214,3 +214,79 @@ def run_guard_sensitivity_portfolio(
         case = sensitivity_case_from_comparison(perturbation, comparison, policy)
         runs.append(SensitivityRun(case, comparison, candidate))
     return runs
+
+
+def active_perturbation_fibres(
+    perturbation: GeometryFibrePerturbation,
+    *,
+    atol: float = 1e-12,
+) -> tuple[str, ...]:
+    """Name explicit defect coordinates without collapsing them into one score."""
+    active = []
+    if any(abs(float(x)) > atol for x in perturbation.origin_delta_m):
+        active.append("camera_origin")
+    if any(abs(float(x)) > atol for x in perturbation.rotation_delta_deg_xyz):
+        active.append("orientation")
+    if abs(float(perturbation.scale_factor) - 1.0) > atol:
+        active.append("metric_scale")
+    if abs(float(perturbation.residual_delta)) > atol:
+        active.append("observation_residual")
+    return tuple(active)
+
+
+def _shrink_perturbation(
+    perturbation: GeometryFibrePerturbation,
+    factor: float,
+    step: int,
+) -> GeometryFibrePerturbation:
+    if not 0.0 < factor < 1.0:
+        raise ValueError("refinement factor must be in (0,1)")
+    return GeometryFibrePerturbation(
+        name=f"{perturbation.name}@refine{step}",
+        origin_delta_m=tuple(float(x) * factor for x in perturbation.origin_delta_m),
+        rotation_delta_deg_xyz=tuple(
+            float(x) * factor for x in perturbation.rotation_delta_deg_xyz
+        ),
+        scale_factor=1.0 + (float(perturbation.scale_factor) - 1.0) * factor,
+        residual_delta=float(perturbation.residual_delta) * factor,
+    )
+
+
+def quality_targeted_refinement(
+    reference_frames,
+    initial_perturbation: GeometryFibrePerturbation,
+    grid_spec,
+    params,
+    policy: ConsumerQualityPolicy,
+    *,
+    max_steps: int = 8,
+    shrink_factor: float = 0.5,
+) -> list[SensitivityRun]:
+    """Shrink only the named defect coordinates until the consumer is adequate.
+
+    This is a bounded diagnostic/refinement experiment, not a pose optimizer.
+    It preserves the observation carrier and asks how much coordinate error the
+    downstream consumer tolerates. No scalar loss is used and no promotion is
+    performed.
+    """
+    if max_steps < 0:
+        raise ValueError("max_steps must be non-negative")
+    history = []
+    perturbation = initial_perturbation
+    for step in range(max_steps + 1):
+        run = run_guard_sensitivity_portfolio(
+            reference_frames,
+            [perturbation],
+            grid_spec,
+            params,
+            policy,
+        )[0]
+        history.append(run)
+        if run.case.within_policy:
+            break
+        perturbation = _shrink_perturbation(
+            perturbation,
+            shrink_factor,
+            step + 1,
+        )
+    return history
