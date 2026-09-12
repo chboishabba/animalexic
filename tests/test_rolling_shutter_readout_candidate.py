@@ -1,7 +1,9 @@
 import unittest
 
 from scripts.rolling_shutter_pose_transport import (
+    ReadoutAcceptanceReceipt,
     RowTimingObservation,
+    accept_readout_candidate,
     estimate_readout_candidate,
 )
 
@@ -54,6 +56,28 @@ class RollingShutterReadoutCandidateTests(unittest.TestCase):
                 min_normalized_row_span=0.5,
                 max_rms_timing_residual_s=0.001,
             )
+
+    def test_readout_candidate_requires_exact_acceptance_receipt(self):
+        candidate = estimate_readout_candidate(
+            [
+                RowTimingObservation(0, 101, -0.010, "a"),
+                RowTimingObservation(50, 101, 0.0, "b"),
+                RowTimingObservation(100, 101, 0.010, "c"),
+            ],
+            min_observations=3,
+            min_normalized_row_span=0.9,
+            max_rms_timing_residual_s=1e-8,
+        )
+        paid = accept_readout_candidate(
+            candidate,
+            ReadoutAcceptanceReceipt("readout-fit-1", "operator", "readout-payment-1"),
+            candidate_reference="readout-fit-1",
+        )
+        self.assertTrue(paid.readout_calibration_paid)
+        self.assertEqual(paid.source_reference, "readout-payment-1")
+        bad = ReadoutAcceptanceReceipt("other", "operator", "bad")
+        with self.assertRaises(ValueError):
+            accept_readout_candidate(candidate, bad, candidate_reference="readout-fit-1")
 
 
 if __name__ == "__main__":
