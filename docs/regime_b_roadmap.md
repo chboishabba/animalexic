@@ -1,40 +1,65 @@
 # Regime B — Live Multicamera / Handheld Roadmap
 
-This document is the current execution frontier for the opportunistic multi-view / handheld path described in `plan.md`. It is deliberately narrower than the historical plan and should be updated as receipts move from implementation to empirical validation.
+This document is the current execution frontier for the opportunistic multi-view / handheld path described in `plan.md`. It distinguishes implementation, controlled synthetic receipts, explicit acceptance/payment, and real empirical validation.
 
 ## Current state
 
 | Layer | Status | Boundary |
 | --- | --- | --- |
 | Known-pose multicamera carrier | implemented | Issue-20 metadata -> `CameraObservation` |
-| Controlled pose perturbation | implemented | experiment input only; original metadata remains ground truth |
-| Image relative-pose recovery | implemented | static visual correspondences -> candidate `R, t_hat` |
-| Metric scale gate | implemented | recovered pose cannot enter metric world without explicit scale receipt |
-| Issue-20 image-pair operator | implemented | archive execution still blocked by binary acquisition in current environment |
-| IMU preintegration | implemented | candidate inertial prior only |
-| Visual-inertial segment correction | implemented | residual-gated correction; may abstain |
-| Local camera trajectory composition | implemented | deterministic candidate `SE(3)` composition |
+| Controlled pose perturbation | implemented | original metadata remains oracle only |
+| Image relative-pose recovery | implemented | static correspondences -> candidate `R, t_hat` |
+| Metric scale gate | implemented | scale-free pose cannot enter metric world |
+| Issue-20 image-pair operator | implemented | archive bytes still unavailable here |
+| IMU preintegration | implemented | candidate inertial prior |
+| Residual-gated visual-inertial segment correction | implemented | incompatible observers abstain |
+| Candidate local trajectory composition | implemented | deterministic `SE(3)` transport only |
+| Clock-offset candidate | implemented | overlap/residual-margin gate; ambiguous motion abstains |
+| Stationary gyro-bias candidate | implemented | per-axis noise gate |
+| Camera<-IMU rotation candidate | implemented | rank/excitation + residual gate |
+| Camera<-IMU lever-arm candidate | implemented | `AX=XB` translation solve; full-rank rotational excitation required |
+| Gravity-referenced accelerometer-bias candidate | implemented | expected rest force is explicit `-R^T g` |
+| Calibration candidate acceptance seams | partially implemented | clock, gyro bias, camera/IMU rotation explicit receipts; lever-arm/accel field acceptance remains debt |
+| Translation pose graph | implemented | anchored global least squares; loop residual gate |
+| Rotation pose graph | implemented | anchored chordal `SO(3)` averaging; loop residual gate |
+| Pose-graph -> existing trajectory carrier | implemented | representation adapter; no joint optimization claim |
+| Fixed-rotation visual-inertial P/V smoother | implemented | one global visual+inertial linear solve with rotations fixed |
+| Full nonlinear VIO / BA | unpaid | rotations, P/V, biases and calibration are not jointly optimized |
 | Cross-camera `SE(3)` / `Sim(3)` weld | implemented | candidate shared-world transform |
-| Static-anchor association | implemented for explicit upstream IDs | exact `anchor_id`, static/confidence/time gates, provenance retained |
-| Robust weld outlier rejection | implemented | deterministic minimal-set consensus + refit |
-| Per-ray world camera origins in voxel guard | implemented | optional `(N,3)` origin fibre; zero-origin SBS fallback preserved |
-| World-weld -> existing guard adapter | implemented | world keyframes + observations -> existing frame points/origins/weights/residuals contract |
-| Guard transport comparison/frontier | implemented | state agreement, ascended IoU, score residual, change mask, signed `{-1,0,+1}` frontier |
-| Known/perturbed/recovered/welded sensitivity run | unpaid | comparison surface exists; controlled end-to-end guard runs remain to execute |
-| Descriptor/track anchor identity discovery | unpaid | similarity cannot auto-promote to same-object identity |
-| Online camera/IMU extrinsic estimation | unpaid | current correction consumes supplied extrinsic |
-| Camera/IMU clock-offset estimation | unpaid | current correction consumes supplied alignment receipt |
-| Online IMU bias estimation | unpaid | biases are explicit input coordinates |
-| Multi-keyframe optimized VIO / loop closure | unpaid | candidate composition is not BA/SLAM |
-| Shared-world voxel/surfel quality validation | unpaid | origin carrier/adapter exists; end-to-end quality receipt does not |
-| Rolling-shutter refinement | unpaid | explicit debt remains in `CameraModel` |
-| Real dual-phone / N-phone field validation | unpaid | required before handheld claims |
+| Static-anchor association with explicit IDs | implemented | static/confidence/time/provenance gates |
+| Robust weld outlier consensus/refit | implemented | inlier/outlier anchor identity retained |
+| Descriptor anchor proposals | implemented candidate-only | mutual/distinctive similarity never pays identity |
+| Temporal descriptor tracks | implemented candidate-only | continuity never pays identity |
+| Exact same-object payment seam | implemented | exact feature IDs + provenance + external receipt required |
+| Per-ray world camera origins in voxel guard | implemented | zero-origin SBS fallback retained |
+| World-weld -> existing guard adapter | implemented | no second geometry governance path |
+| Guard transport comparison/frontier | implemented | agreement, ascended IoU, score residual, changed-state mask, ternary frontier |
+| Controlled guard sensitivity portfolio | executed in exact-content mirror | synthetic only; not Issue-20/phone evidence |
+| Pareto refinement frontier | implemented | no weighted scalar collapse |
+| Quality-targeted geometry refinement | implemented | terminates `within_policy`, `consumer_plateau`, or `max_steps` |
+| Rolling-shutter row-time pose transport | implemented | candidate row pose from supplied readout model |
+| Rolling-shutter readout time/direction candidate | implemented | row-span + timing-residual gates |
+| Rolling-shutter readout acceptance | implemented | exact candidate-reference receipt required |
+| Shared-world voxel/surfel field-quality validation | unpaid | end-to-end real carrier still missing |
+| Real dual-phone / N-phone validation | unpaid | required before handheld claims |
+
+## Controlled receipts now available
+
+The synthetic guard sensitivity probe compares the same guarded consumer under isolated geometry defects. Under its explicit synthetic policy, the oracle is exact while 25 cm origin error, 10 deg yaw, +10% scale, and +5 observation residual all violate consumer policy. The Pareto-maximal defect in that carrier is the yaw/orientation fibre. Halving yaw eventually hits a quantized guard plateau: producer error keeps shrinking while three guard cells remain changed, so the refinement terminates `consumer_plateau` rather than inventing closure.
+
+The camera/IMU hand-eye translation probe recovers a known `(0.12,-0.04,0.08) m` lever arm from a rank-3 stacked system to floating-point error; pure translation has rank 0 and is rejected. Translation and rotation pose-graph probes likewise separate consistent loops from inconsistent loops by explicit consumer residual gates.
+
+These are controlled implementation receipts, not field tolerances.
 
 ## dashiRTX cross-pollination
 
-The sibling `chboishabba/dashiRTX` work provides a useful architecture, not a replacement geometry model. Its PDA/MDL light-transport toy explicitly transports depth/radiance between camera poses, measures reprojection error, retains a signed ternary frontier, importance and persistent state, and targets refresh/refinement where transport error is consumer-visible. Its roadmap similarly prioritizes quality-targeted `render -> error -> refine -> retrain` loops.
+The sibling `chboishabba/dashiRTX` work contributes a structural pattern, not rendering truth for Animalexic:
 
-Animalexic now reuses that pattern over geometry only:
+```text
+transport -> consumer error/frontier -> localise active fibre -> targeted refinement
+```
+
+Animalexic applies that pattern to camera/world geometry:
 
 ```text
 known-pose oracle guard
@@ -42,37 +67,42 @@ known-pose oracle guard
   -> existing voxel guard
   -> state/score residual
   -> signed {-1,0,+1} frontier
-  -> refine the pose/weld fibre causing consumer-visible error
+  -> refine only the geometry fibre visible to the consumer
 ```
 
-This does **not** import radiance semantics, MDL scores as truth, or dashiRTX rendering authority. It is a cross-domain transport/refinement pattern only.
+No radiance semantics or MDL score is promoted into camera/world truth.
 
-## Highest-alpha next sequence
+## Highest-alpha remaining sequence
 
-1. **Execute the controlled guard sensitivity portfolio.** Run the same world observations through known pose, controlled perturbations, image-recovered pose, and robust-welded pose. Measure ascended IoU, state agreement, score residual and the signed frontier.
-2. **Attribute the frontier to the producer fibre.** Separate camera-origin error, orientation error, world-weld residual, scale error and observation residual instead of optimizing one undifferentiated geometry score.
-3. **Quality-targeted pose/weld refinement.** Borrow the dashiRTX refinement discipline: refine only fibres that change the downstream consumer surface; stop when the consumer residual is within its policy bound rather than demanding globally perfect pose.
-4. **Anchor identity discovery as a candidate producer.** Add static feature/track proposals with explicit ambiguity and provenance. Descriptor or geometric similarity may propose identity; only a governed same-object receipt may pay it.
-5. **Temporal anchor tracks.** Preserve anchor identity across time and reject identity switches before cross-camera welding.
-6. **Estimate clock/extrinsic/bias coordinates.** Move supplied VIO calibration coordinates into learned candidates one at a time, each with a residual-based abstention route.
-7. **Real phone capture.** Two unsynchronised phones first; then N cameras of heterogeneous type. Keep rolling shutter and weak overlap as explicit degradation coordinates.
+1. **Acquire/execute the Issue-20 binary archive.** Run known pose, recovered pose and robust-welded pose through the exact same guard and replace synthetic sensitivity coordinates with dataset receipts.
+2. **Run a real two-phone capture with frame + IMU logs.** Exercise learned clock, camera/IMU rotation, lever arm, gyro/accel bias and rolling-shutter candidates against a real carrier.
+3. **Measure shared-world voxel and surfel degradation.** Preserve the dashiRTX-style consumer frontier and attribute failures back to origin/orientation/scale/timing/weld fibres.
+4. **Only if the real carrier requires it, add joint nonlinear VIO/BA.** The current bounded graph/smoother stack intentionally stops short of claiming full VIO.
+5. **Then generalise from two phones to N heterogeneous cameras.** Keep weak overlap, independent clocks, rolling shutter and scale debt explicit.
 
 ## Non-collapse rules
 
 - descriptor similarity != same-object identity
-- temporal proximity != same-object identity
+- temporal continuity != same-object identity
 - low weld residual != correct identity
 - `Sim(3)` alignment != metric scale paid
-- corrected candidate trajectory != promoted VIO
+- calibration candidate != accepted calibration
+- accepted calibration != field validation
+- translation/rotation pose graphs != full VIO
+- fixed-rotation P/V smoother != nonlinear BA/SLAM
 - world-welded camera origin != promoted voxel
 - lower guard transport residual != correct pose
 - better ascended IoU != physical truth
-- dashiRTX lower MDL / render error != Animalexic geometry truth
+- smaller producer perturbation != consumer closure
+- dashiRTX lower MDL/render error != Animalexic geometry truth
 - successful synthetic recovery != Issue-20 archive validation
 - successful Issue-20 validation != handheld-phone validation
 
-## Empirical blockers
+## Hard blockers in this environment
 
-- The contributed Issue-20 `test_data.tar.xz` identity is known, but this execution environment cannot materialize the binary archive through the current connector. Treat this as acquisition debt, not implementation debt.
-- A real dual-phone capture with synchronized frame/IMU logs is still required for field validation.
-- Agda owners are source-wired in `dashi_agda`; a fresh Agda kernel receipt still requires an Agda-capable execution environment.
+- The contributed Issue-20 `test_data.tar.xz` identity is known, but the current connector cannot materialize the binary archive. Treat this as acquisition debt, not algorithmic debt.
+- `animalexic` has no GitHub workflow directory on this branch, so pushes do not currently yield a branch CI receipt here.
+- Container DNS cannot clone/download the GitHub branch, so focused Python checks have used exact-content mirrors or standalone equation probes rather than a true checkout.
+- A real dual-phone capture with synchronized frame/IMU logs is not available in this session.
+- The Agda owners are source-wired in `dashi_agda`, but this execution environment has no fresh Agda kernel receipt for these new owners.
+- The `dashi_agda` Animalexic branch has diverged from newer `master`; reconciliation should occur before treating aggregate compilation against current master as paid.
