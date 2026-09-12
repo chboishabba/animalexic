@@ -2,10 +2,8 @@ import unittest
 
 import numpy as np
 
-from scripts.vio_calibration_candidates import (
-    TimedVectorSample,
-    estimate_accel_bias_candidate,
-)
+from scripts.accel_bias_candidate import estimate_accel_bias_candidate
+from scripts.vio_calibration_candidates import TimedVectorSample
 
 
 class AccelerometerBiasCandidateTests(unittest.TestCase):
