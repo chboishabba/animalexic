@@ -42,6 +42,34 @@ class CameraIMURotationCandidate:
     extrinsic_calibration_paid: bool = False
 
 
+@dataclass(frozen=True)
+class CalibrationAcceptanceReceipt:
+    coordinate: str
+    candidate_reference: str
+    accepted_by: str
+    receipt_ref: str
+
+
+@dataclass(frozen=True)
+class PaidClockAlignment:
+    offset_s: float
+    source_reference: str
+
+
+@dataclass(frozen=True)
+class PaidCameraIMUExtrinsic:
+    rotation_camera_from_imu: tuple[float, ...]
+    translation_camera_from_imu_m: tuple[float, float, float]
+    source_reference: str
+
+
+@dataclass(frozen=True)
+class PaidGyroBias:
+    bias_rad_s: tuple[float, float, float]
+    source_reference: str
+    online_bias_optimization_paid: bool = False
+
+
 def _validated_series(samples):
     values = list(samples)
     if len(values) < 2:
@@ -102,9 +130,7 @@ def estimate_clock_offset_candidate(
         query_times = reference_times[mask]
         if len(query_times) < min_overlap:
             continue
-        interpolated = _interpolate_matrix(
-            aligned_sensor_times, sensor_values, query_times
-        )
+        interpolated = _interpolate_matrix(aligned_sensor_times, sensor_values, query_times)
         residual = reference_values[mask] - interpolated
         rms = float(np.sqrt(np.mean(np.square(residual))))
         scored.append((rms, offset, int(len(query_times))))
@@ -136,7 +162,6 @@ def estimate_gyro_bias_candidate(
     min_samples: int,
     max_axis_std_rad_s: float,
 ) -> GyroBiasCandidate:
-    """Estimate a stationary gyro-bias candidate without claiming online bias payment."""
     if min_samples < 2:
         raise ValueError("min_samples must be at least two")
     if max_axis_std_rad_s < 0 or not math.isfinite(max_axis_std_rad_s):
@@ -165,13 +190,6 @@ def estimate_camera_imu_rotation_candidate(
     *,
     max_rms_vector_residual: float,
 ) -> CameraIMURotationCandidate:
-    """Solve a bounded Wahba/Kabsch camera<-IMU rotation candidate.
-
-    Input vectors are paired motion/gravity/direction observations expressed in
-    the IMU and camera frames.  At least rank-2 excitation is required.  This
-    estimates rotation only; lever-arm translation and field validation remain
-    separate debt.
-    """
     if max_rms_vector_residual < 0 or not math.isfinite(max_rms_vector_residual):
         raise ValueError("max_rms_vector_residual must be finite and non-negative")
     imu = np.asarray(imu_vectors, dtype=np.float64)
@@ -199,4 +217,74 @@ def estimate_camera_imu_rotation_candidate(
         pair_count=int(len(imu)),
         status="abstain" if abstain else "candidate",
         extrinsic_calibration_paid=False,
+    )
+
+
+def _validate_acceptance(
+    receipt: CalibrationAcceptanceReceipt,
+    *,
+    coordinate: str,
+    candidate_reference: str,
+) -> None:
+    if receipt.coordinate != coordinate:
+        raise ValueError("acceptance receipt coordinate does not match candidate")
+    if receipt.candidate_reference != candidate_reference:
+        raise ValueError("acceptance receipt candidate reference does not match")
+    if not receipt.accepted_by or not receipt.receipt_ref or not candidate_reference:
+        raise ValueError("acceptance receipt requires actor, receipt ref, and candidate ref")
+
+
+def accept_clock_offset_candidate(
+    candidate: ClockOffsetCandidate,
+    receipt: CalibrationAcceptanceReceipt,
+    *,
+    candidate_reference: str,
+) -> PaidClockAlignment:
+    if candidate.status != "candidate" or candidate.ambiguous:
+        raise ValueError("only unambiguous clock candidates may be paid")
+    _validate_acceptance(
+        receipt, coordinate="clock_offset", candidate_reference=candidate_reference
+    )
+    return PaidClockAlignment(float(candidate.offset_s), receipt.receipt_ref)
+
+
+def accept_camera_imu_rotation_candidate(
+    candidate: CameraIMURotationCandidate,
+    *,
+    translation_camera_from_imu_m,
+    receipt: CalibrationAcceptanceReceipt,
+    candidate_reference: str,
+) -> PaidCameraIMUExtrinsic:
+    if candidate.status != "candidate":
+        raise ValueError("only candidate camera/IMU rotations may be paid")
+    _validate_acceptance(
+        receipt,
+        coordinate="camera_imu_rotation",
+        candidate_reference=candidate_reference,
+    )
+    translation = np.asarray(translation_camera_from_imu_m, dtype=np.float64)
+    if translation.shape != (3,) or not np.all(np.isfinite(translation)):
+        raise ValueError("camera/IMU lever-arm translation must be finite xyz")
+    return PaidCameraIMUExtrinsic(
+        rotation_camera_from_imu=tuple(candidate.rotation_camera_from_imu),
+        translation_camera_from_imu_m=tuple(float(x) for x in translation),
+        source_reference=receipt.receipt_ref,
+    )
+
+
+def accept_gyro_bias_candidate(
+    candidate: GyroBiasCandidate,
+    receipt: CalibrationAcceptanceReceipt,
+    *,
+    candidate_reference: str,
+) -> PaidGyroBias:
+    if candidate.status != "candidate" or candidate.noisy:
+        raise ValueError("only non-noisy gyro bias candidates may be paid")
+    _validate_acceptance(
+        receipt, coordinate="gyro_bias", candidate_reference=candidate_reference
+    )
+    return PaidGyroBias(
+        bias_rad_s=tuple(candidate.bias_rad_s),
+        source_reference=receipt.receipt_ref,
+        online_bias_optimization_paid=False,
     )
